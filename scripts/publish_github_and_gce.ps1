@@ -19,7 +19,8 @@ param(
     [string]$SecretName = "gtv-elevadores-streamlit-secrets",
     [string]$FirewallRuleName = "allow-gtv-elevadores-8501",
     [string]$CommitMessage = "Prepare Google Cloud deployment",
-    [switch]$OpenBrowser
+    [switch]$OpenBrowser,
+    [switch]$ReplaceRemoteMain
 )
 
 Set-StrictMode -Version Latest
@@ -198,7 +199,11 @@ try {
         Invoke-Checked git @("commit", "-m", $CommitMessage)
     }
 
-    Invoke-Checked git @("push", "-u", "origin", $Branch)
+    $pushArgs = @("push", "-u", "origin", $Branch)
+    if ($ReplaceRemoteMain) {
+        $pushArgs += "--force-with-lease"
+    }
+    Invoke-Checked git $pushArgs
 
     if (-not (Test-GcpProjectExists $ProjectId)) {
         if (-not $CreateProject) {
