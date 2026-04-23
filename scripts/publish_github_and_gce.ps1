@@ -19,6 +19,8 @@ param(
     [string]$SecretName = "gtv-elevadores-streamlit-secrets",
     [string]$FirewallRuleName = "allow-gtv-elevadores-8501",
     [string]$CommitMessage = "Prepare Google Cloud deployment",
+    [ValidateSet("ask", "preserve", "reset")]
+    [string]$CloudDataMode = "ask",
     [switch]$OpenBrowser,
     [switch]$ReplaceRemoteMain
 )
@@ -217,6 +219,20 @@ PY
     throw "La aplicacion no respondio a tiempo dentro de la VM."
 }
 
+function Resolve-ResetCloudDataChoice([string]$Mode) {
+    switch ($Mode) {
+        "preserve" { return $false }
+        "reset" { return $true }
+        default {
+            $answer = Read-Host "¿Deseas borrar los datos/documentos/base de datos existentes en la nube? [s/N]"
+            if ($answer -match '^(s|si|sí|y|yes)$') {
+                return $true
+            }
+            return $false
+        }
+    }
+}
+
 Assert-Command git
 Assert-Command gh
 Assert-Command gcloud
@@ -224,6 +240,8 @@ Assert-Command tar
 
 Push-Location $RepoRoot
 try {
+    $resetCloudData = Resolve-ResetCloudDataChoice -Mode $CloudDataMode
+
     if (-not (Test-Path ".streamlit\secrets.toml")) {
         throw "Falta .streamlit\secrets.toml. Debes configurarlo antes de publicar."
     }
@@ -345,7 +363,7 @@ try {
 
     $remoteCommand = @(
         "chmod +x $RemoteInstallerPath",
-        "sudo $RemoteInstallerPath --bundle $RemoteBundlePath --secrets $RemoteSecretsPath --app-dir $AppDir --service-name $ServiceName"
+        "sudo $RemoteInstallerPath --bundle $RemoteBundlePath --secrets $RemoteSecretsPath --app-dir $AppDir --service-name $ServiceName --reset-data $($resetCloudData.ToString().ToLowerInvariant())"
     ) -join " && "
 
     Invoke-Checked gcloud @(
@@ -381,6 +399,7 @@ try {
     Write-Host "VM: $VmName"
     Write-Host "Aplicacion: $AppUrl"
     Write-Host "Secret Manager: $SecretName"
+    Write-Host "Datos en nube reiniciados: $resetCloudData"
     Write-Host "URL publica verificada: $externalReachable"
 
     if ($OpenBrowser) {

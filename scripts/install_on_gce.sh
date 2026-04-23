@@ -6,6 +6,8 @@ SECRETS_PATH=""
 APP_DIR="/opt/gtv-elevadores-01"
 APP_USER="gtvapp"
 SERVICE_NAME="gtv-elevadores-01"
+RESET_DATA="false"
+PERSISTENT_DATA_DIR=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -29,6 +31,10 @@ while [[ $# -gt 0 ]]; do
       SERVICE_NAME="$2"
       shift 2
       ;;
+    --reset-data)
+      RESET_DATA="$2"
+      shift 2
+      ;;
     *)
       echo "Parametro no reconocido: $1" >&2
       exit 1
@@ -41,6 +47,8 @@ if [[ -z "$BUNDLE_PATH" || -z "$SECRETS_PATH" ]]; then
   exit 1
 fi
 
+PERSISTENT_DATA_DIR="${APP_DIR}/data"
+
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y python3 python3-venv python3-pip ca-certificates tar build-essential
@@ -50,12 +58,25 @@ if ! id -u "$APP_USER" >/dev/null 2>&1; then
 fi
 
 mkdir -p "$APP_DIR"
+
+if [[ "$RESET_DATA" == "true" ]]; then
+  rm -rf "$PERSISTENT_DATA_DIR"
+fi
+
+mkdir -p "$PERSISTENT_DATA_DIR"
+if [[ -d "$APP_DIR/app/data" && "$RESET_DATA" != "true" ]]; then
+  cp -a "$APP_DIR/app/data/." "$PERSISTENT_DATA_DIR/" 2>/dev/null || true
+fi
+
 rm -rf "$APP_DIR/app"
 mkdir -p "$APP_DIR/app"
 tar -xzf "$BUNDLE_PATH" -C "$APP_DIR/app"
 
-mkdir -p "$APP_DIR/app/.streamlit" "$APP_DIR/app/data"
+mkdir -p "$APP_DIR/app/.streamlit"
 install -m 600 "$SECRETS_PATH" "$APP_DIR/app/.streamlit/secrets.toml"
+
+rm -rf "$APP_DIR/app/data"
+ln -s "$PERSISTENT_DATA_DIR" "$APP_DIR/app/data"
 
 python3 -m venv "$APP_DIR/app/.venv"
 "$APP_DIR/app/.venv/bin/pip" install --upgrade pip
