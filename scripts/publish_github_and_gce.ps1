@@ -31,9 +31,9 @@ $RepoRoot = Resolve-Path (Join-Path $ScriptRoot "..")
 $RepoFullName = "$GitHubOwner/$GitHubRepo"
 $RepoUrl = "https://github.com/$RepoFullName.git"
 $BundlePath = Join-Path $env:TEMP "$ServiceName-deploy.tar.gz"
-$RemoteBundlePath = "~/$(Split-Path $BundlePath -Leaf)"
-$RemoteSecretsPath = "~/$(Split-Path '.streamlit\secrets.toml' -Leaf)"
-$RemoteInstallerPath = "~/install_on_gce.sh"
+$RemoteBundlePath = "/tmp/$(Split-Path $BundlePath -Leaf)"
+$RemoteSecretsPath = "/tmp/$(Split-Path '.streamlit\secrets.toml' -Leaf)"
+$RemoteInstallerPath = "/tmp/install_on_gce.sh"
 $AppDir = "/opt/$ServiceName"
 $AppUrl = $null
 
@@ -277,16 +277,33 @@ try {
         "."
     )
 
-    Invoke-Checked gcloud @("compute", "scp", "--project", $ProjectId, "--zone", $Zone, $BundlePath, "${VmName}:$RemoteBundlePath")
-    Invoke-Checked gcloud @("compute", "scp", "--project", $ProjectId, "--zone", $Zone, ".streamlit\secrets.toml", "${VmName}:$RemoteSecretsPath")
-    Invoke-Checked gcloud @("compute", "scp", "--project", $ProjectId, "--zone", $Zone, "scripts\install_on_gce.sh", "${VmName}:$RemoteInstallerPath")
+    $scpCommonArgs = @(
+        "compute", "scp",
+        "--project", $ProjectId,
+        "--zone", $Zone,
+        "--quiet",
+        "--force-key-file-overwrite",
+        "--strict-host-key-checking=no"
+    )
+
+    Invoke-Checked gcloud ($scpCommonArgs + @($BundlePath, "${VmName}:$RemoteBundlePath"))
+    Invoke-Checked gcloud ($scpCommonArgs + @(".streamlit\secrets.toml", "${VmName}:$RemoteSecretsPath"))
+    Invoke-Checked gcloud ($scpCommonArgs + @("scripts\install_on_gce.sh", "${VmName}:$RemoteInstallerPath"))
 
     $remoteCommand = @(
         "chmod +x $RemoteInstallerPath",
         "sudo $RemoteInstallerPath --bundle $RemoteBundlePath --secrets $RemoteSecretsPath --app-dir $AppDir --service-name $ServiceName"
     ) -join " && "
 
-    Invoke-Checked gcloud @("compute", "ssh", $VmName, "--project", $ProjectId, "--zone", $Zone, "--command", $remoteCommand)
+    Invoke-Checked gcloud @(
+        "compute", "ssh", $VmName,
+        "--project", $ProjectId,
+        "--zone", $Zone,
+        "--quiet",
+        "--force-key-file-overwrite",
+        "--strict-host-key-checking=no",
+        "--command", $remoteCommand
+    )
 
     $externalIp = (& gcloud compute instances describe $VmName --project $ProjectId --zone $Zone --format "get(networkInterfaces[0].accessConfigs[0].natIP)").Trim()
     if (-not $externalIp) {
