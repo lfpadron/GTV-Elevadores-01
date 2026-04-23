@@ -70,11 +70,15 @@ def render(connection, user: AuthenticatedUser) -> None:
         {
             "Seleccionar": row["document_id"] == selected_document_id,
             "document_id": row["document_id"],
+            "Referencia origen": row.get("source_reference") or "",
+            "Identificador principal": row.get("primary_identifier") or "",
             "Fecha": row.get("document_date") or "",
             "Hora": row.get("document_time") or "",
             "Tipo de documento": _document_type_label(row),
             "Nombre del documento": row.get("file_name_original") or "",
             "Torre, equipo": _equipment_label(row),
+            "Causa": row.get("cause_text") or "",
+            "Recomendación": row.get("recommendation_text") or "",
             "Descripción suscinta": row.get("concise_description") or "",
         }
         for row in rows
@@ -107,6 +111,8 @@ def render(connection, user: AuthenticatedUser) -> None:
     st.subheader("Documento seleccionado")
     st.write(f"Documento original: {selected_row.get('file_name_original') or ''}")
     st.write(f"Tipo: {_document_type_label(selected_row)}")
+    st.write(f"Referencia origen: {selected_row.get('source_reference') or ''}")
+    st.write(f"Identificador principal: {selected_row.get('primary_identifier') or ''}")
     st.write(f"Torre / equipo: {_equipment_label(selected_row)}")
     st.caption(f"Estado actual: {(selected_row.get('inclusion_status') or 'incluido').title()}")
 

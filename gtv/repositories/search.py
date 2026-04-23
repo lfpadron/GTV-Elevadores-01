@@ -7,6 +7,51 @@ from sqlite3 import Connection, OperationalError
 from gtv.utils.equipment import EQUIPMENT_OTHER_FILTER_VALUE, catalog_equipment_codes, resolve_equipment_code_alias
 
 
+ESTIMATE_CONCEPT_SUMMARY_SQL = """
+COALESCE(
+    (
+        SELECT group_concat(concept_text, ' | ')
+        FROM (
+            SELECT ei2.concept_text AS concept_text
+            FROM estimate_items ei2
+            WHERE ei2.estimate_document_id = d.id
+              AND COALESCE(ei2.concept_text, '') <> ''
+            ORDER BY ei2.line_number ASC
+            LIMIT 3
+        ) concept_rows
+    ),
+    ''
+)
+"""
+
+SOURCE_REFERENCE_SQL = """
+CASE
+    WHEN d.document_type = 'reporte' THEN COALESCE(fr.ticket_number, d.primary_identifier, '')
+    WHEN d.document_type = 'hallazgo' THEN COALESCE(fi.base_ticket_number, fi.finding_folio, d.primary_identifier, '')
+    WHEN d.document_type = 'estimacion' THEN COALESCE(es.normalized_folio, es.original_folio, d.primary_identifier, '')
+    ELSE COALESCE(d.primary_identifier, '')
+END
+"""
+
+CAUSE_TEXT_SQL = """
+CASE
+    WHEN d.document_type = 'reporte' THEN COALESCE(fr.cause_text, fr.description, d.short_description, '')
+    WHEN d.document_type = 'hallazgo' THEN COALESCE(fi.description, fi.affected_part_text, d.short_description, '')
+    WHEN d.document_type = 'estimacion' THEN COALESCE(d.summary_user_edited, d.summary_ai_original, d.short_description, '')
+    ELSE COALESCE(d.short_description, '')
+END
+"""
+
+RECOMMENDATION_TEXT_SQL = f"""
+CASE
+    WHEN d.document_type = 'reporte' THEN COALESCE(fr.solution_text, '')
+    WHEN d.document_type = 'hallazgo' THEN COALESCE(fi.recommendation_text, '')
+    WHEN d.document_type = 'estimacion' THEN {ESTIMATE_CONCEPT_SUMMARY_SQL}
+    ELSE ''
+END
+"""
+
+
 def search_documents(connection: Connection, filters: dict) -> list[dict]:
     clauses = ["1 = 1"]
     params: list[object] = []
@@ -64,15 +109,9 @@ def search_documents(connection: Connection, filters: dict) -> list[dict]:
                     """
                 )
                 params.extend([f"%{filters['equipment']}%"] * 3)
-    if filters.get("state"):
-        clauses.append(
-            """
-            (
-                COALESCE(fr.report_state, fi.finding_state, es.estimate_state, '') = ?
-            )
-            """
-        )
-        params.append(filters["state"])
+    if filters.get("document_type"):
+        clauses.append("d.document_type = ?")
+        params.append(filters["document_type"])
     if filters.get("inclusion_status"):
         clauses.append("COALESCE(d.inclusion_status, 'incluido') = ?")
         params.append(filters["inclusion_status"])
@@ -84,12 +123,7 @@ def search_documents(connection: Connection, filters: dict) -> list[dict]:
             d.id AS document_id,
             d.document_type,
             d.storage_path,
-            CASE
-                WHEN d.document_type = 'reporte' THEN COALESCE(fr.ticket_number, d.primary_identifier, '')
-                WHEN d.document_type = 'hallazgo' THEN COALESCE(fi.base_ticket_number, fi.finding_folio, d.primary_identifier, '')
-                WHEN d.document_type = 'estimacion' THEN COALESCE(es.normalized_folio, es.original_folio, d.primary_identifier, '')
-                ELSE COALESCE(d.primary_identifier, '')
-            END AS source_reference,
+            {SOURCE_REFERENCE_SQL} AS source_reference,
             d.primary_identifier,
             d.document_date,
             d.document_time,
@@ -99,12 +133,14 @@ def search_documents(connection: Connection, filters: dict) -> list[dict]:
             d.equipment_code,
             d.inclusion_status,
             COALESCE(fr.report_state, fi.finding_state, es.estimate_state, '') AS current_state,
+            {CAUSE_TEXT_SQL} AS cause_text,
+            {RECOMMENDATION_TEXT_SQL} AS recommendation_text,
             d.short_description,
             COALESCE(d.summary_user_edited, d.summary_ai_original, d.short_description, '') AS detail_summary,
             CASE
                 WHEN d.document_type = 'reporte' THEN COALESCE(fr.description, d.short_description, '')
                 WHEN d.document_type = 'hallazgo' THEN COALESCE(fi.description, d.short_description, '')
-                WHEN d.document_type = 'estimacion' THEN COALESCE(es.original_folio, d.short_description, '')
+                WHEN d.document_type = 'estimacion' THEN COALESCE(d.summary_user_edited, d.summary_ai_original, d.short_description, es.original_folio, '')
                 ELSE COALESCE(d.short_description, '')
             END AS concise_description,
             d.file_name_original
@@ -164,6 +200,9 @@ def search_document_pages(connection: Connection, filters: dict) -> tuple[list[d
                     """
                 )
                 params.extend([f"%{filters['equipment']}%"] * 3)
+    if filters.get("document_type"):
+        clauses.append("d.document_type = ?")
+        params.append(filters["document_type"])
     if filters.get("inclusion_status"):
         clauses.append("COALESCE(d.inclusion_status, 'incluido') = ?")
         params.append(filters["inclusion_status"])
@@ -182,12 +221,9 @@ def search_document_pages(connection: Connection, filters: dict) -> tuple[list[d
                 d.document_date,
                 d.inclusion_status,
                 d.primary_identifier,
-                CASE
-                    WHEN d.document_type = 'reporte' THEN COALESCE(fr.ticket_number, d.primary_identifier, '')
-                    WHEN d.document_type = 'hallazgo' THEN COALESCE(fi.base_ticket_number, fi.finding_folio, d.primary_identifier, '')
-                    WHEN d.document_type = 'estimacion' THEN COALESCE(es.normalized_folio, es.original_folio, d.primary_identifier, '')
-                    ELSE COALESCE(d.primary_identifier, '')
-                END AS source_reference
+                {SOURCE_REFERENCE_SQL} AS source_reference,
+                {CAUSE_TEXT_SQL} AS cause_text,
+                {RECOMMENDATION_TEXT_SQL} AS recommendation_text
             FROM document_pages_fts
             JOIN document_pages dp
               ON dp.document_id = document_pages_fts.document_id

@@ -164,6 +164,59 @@ function Wait-ForUrl([string]$Url, [int]$TimeoutSeconds = 180) {
     throw "La aplicacion no respondio a tiempo en $Url"
 }
 
+function Test-UrlReachable([string]$Url, [int]$TimeoutSeconds = 15) {
+    try {
+        $response = Invoke-WebRequest -UseBasicParsing -Uri $Url -TimeoutSec $TimeoutSeconds
+        return ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500)
+    } catch {
+        return $false
+    }
+}
+
+function Get-InstanceExternalIp([string]$InstanceName, [string]$ActiveProjectId, [string]$ActiveZone, [int]$Retries = 12) {
+    for ($attempt = 1; $attempt -le $Retries; $attempt++) {
+        $value = (& gcloud compute instances describe $InstanceName --project $ActiveProjectId --zone $ActiveZone --format "value(networkInterfaces[0].accessConfigs[0].natIP)")
+        $ip = ($value | Out-String).Trim()
+        if ($ip) {
+            return $ip
+        }
+        Start-Sleep -Seconds 5
+    }
+    return ""
+}
+
+function Wait-ForRemoteLocalApp([string]$InstanceName, [string]$ActiveProjectId, [string]$ActiveZone, [int]$TimeoutSeconds = 300) {
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $pythonProbe = @'
+python3 - <<'PY'
+from urllib.request import urlopen
+try:
+    with urlopen("http://127.0.0.1:8501", timeout=10) as response:
+        code = response.getcode()
+        if 200 <= code < 500:
+            print("ok")
+            raise SystemExit(0)
+except Exception:
+    raise SystemExit(1)
+PY
+'@
+
+    while ((Get-Date) -lt $deadline) {
+        & gcloud compute ssh $InstanceName `
+            --project $ActiveProjectId `
+            --zone $ActiveZone `
+            --quiet `
+            --force-key-file-overwrite `
+            --strict-host-key-checking=no `
+            --command $pythonProbe 1>$null 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            return
+        }
+        Start-Sleep -Seconds 5
+    }
+    throw "La aplicacion no respondio a tiempo dentro de la VM."
+}
+
 Assert-Command git
 Assert-Command gh
 Assert-Command gcloud
@@ -305,13 +358,21 @@ try {
         "--command", $remoteCommand
     )
 
-    $externalIp = (& gcloud compute instances describe $VmName --project $ProjectId --zone $Zone --format "get(networkInterfaces[0].accessConfigs[0].natIP)").Trim()
+    Wait-ForRemoteLocalApp -InstanceName $VmName -ActiveProjectId $ProjectId -ActiveZone $Zone -TimeoutSeconds 300
+
+    $externalIp = Get-InstanceExternalIp -InstanceName $VmName -ActiveProjectId $ProjectId -ActiveZone $Zone -Retries 12
     if (-not $externalIp) {
         throw "No fue posible obtener la IP externa de la VM."
     }
 
     $AppUrl = "http://$externalIp:8501"
-    Wait-ForUrl -Url $AppUrl -TimeoutSeconds 240
+    $externalReachable = $false
+    try {
+        Wait-ForUrl -Url $AppUrl -TimeoutSeconds 420
+        $externalReachable = $true
+    } catch {
+        Write-Warning "La app ya responde dentro de la VM, pero la URL publica aun no respondio a tiempo. Se continuara de todos modos."
+    }
 
     Write-Host ""
     Write-Host "Publicacion completada."
@@ -320,6 +381,7 @@ try {
     Write-Host "VM: $VmName"
     Write-Host "Aplicacion: $AppUrl"
     Write-Host "Secret Manager: $SecretName"
+    Write-Host "URL publica verificada: $externalReachable"
 
     if ($OpenBrowser) {
         Start-Process $AppUrl

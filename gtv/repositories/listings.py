@@ -7,10 +7,28 @@ from sqlite3 import Connection
 from gtv.utils.equipment import EQUIPMENT_OTHER_FILTER_VALUE, catalog_equipment_codes, resolve_equipment_code_alias
 
 
+ESTIMATE_CONCEPT_SUMMARY_SQL = """
+COALESCE(
+    (
+        SELECT group_concat(concept_text, ' | ')
+        FROM (
+            SELECT ei2.concept_text AS concept_text
+            FROM estimate_items ei2
+            WHERE ei2.estimate_document_id = d.id
+              AND COALESCE(ei2.concept_text, '') <> ''
+            ORDER BY ei2.line_number ASC
+            LIMIT 3
+        ) concept_rows
+    ),
+    ''
+)
+"""
+
+
 def list_report_ticket_rows(connection: Connection, filters: dict) -> list[dict]:
     clauses = [
         "d.document_status = 'activo'",
-        "d.document_type IN ('reporte', 'hallazgo')",
+        "d.document_type IN ('reporte', 'hallazgo', 'estimacion')",
     ]
     params: list[object] = []
 
@@ -28,17 +46,22 @@ def list_report_ticket_rows(connection: Connection, filters: dict) -> list[dict]
                 COALESCE(fr.ticket_number, '') LIKE ?
                 OR COALESCE(fi.base_ticket_number, '') LIKE ?
                 OR COALESCE(fi.finding_folio, '') LIKE ?
+                OR COALESCE(es.original_folio, '') LIKE ?
+                OR COALESCE(es.normalized_folio, '') LIKE ?
                 OR COALESCE(d.primary_identifier, '') LIKE ?
             )
             """
         )
-        params.extend([needle, needle, needle, needle])
+        params.extend([needle, needle, needle, needle, needle, needle])
     if filters.get("state"):
-        clauses.append("COALESCE(fr.report_state, fi.finding_state, '') = ?")
+        clauses.append("COALESCE(fr.report_state, fi.finding_state, es.estimate_state, '') = ?")
         params.append(filters["state"])
     if filters.get("tower"):
         clauses.append("COALESCE(d.tower, '') = ?")
         params.append(filters["tower"])
+    if filters.get("document_type"):
+        clauses.append("d.document_type = ?")
+        params.append(filters["document_type"])
     if filters.get("equipment"):
         if filters["equipment"] == EQUIPMENT_OTHER_FILTER_VALUE:
             known_codes = [code.upper() for code in catalog_equipment_codes()]
@@ -79,48 +102,54 @@ def list_report_ticket_rows(connection: Connection, filters: dict) -> list[dict]
             d.document_date,
             d.document_time,
             trim(COALESCE(d.document_date, '') || ' ' || COALESCE(d.document_time, '')) AS opened_at,
-            COALESCE(
-                (
-                    SELECT MIN(a.event_at)
-                    FROM audit_logs a
-                    WHERE a.entity_type = CASE
-                            WHEN d.document_type = 'reporte' THEN 'reporte'
-                            ELSE 'hallazgo'
-                        END
-                      AND a.entity_id = CAST(d.id AS TEXT)
-                      AND a.field_name = CASE
-                            WHEN d.document_type = 'reporte' THEN 'report_state'
-                            ELSE 'finding_state'
-                        END
-                      AND a.new_value IN ('en_atencion', 'atendido', 'cerrado')
-                ),
-                CASE
-                    WHEN COALESCE(fr.report_state, fi.finding_state, '') IN ('en_atencion', 'atendido', 'cerrado')
-                    THEN trim(COALESCE(d.document_date, '') || ' ' || COALESCE(d.document_time, ''))
-                    ELSE ''
-                END
-            ) AS attended_at,
-            COALESCE(
-                (
-                    SELECT MIN(a.event_at)
-                    FROM audit_logs a
-                    WHERE a.entity_type = CASE
-                            WHEN d.document_type = 'reporte' THEN 'reporte'
-                            ELSE 'hallazgo'
-                        END
-                      AND a.entity_id = CAST(d.id AS TEXT)
-                      AND a.field_name = CASE
-                            WHEN d.document_type = 'reporte' THEN 'report_state'
-                            ELSE 'finding_state'
-                        END
-                      AND a.new_value = 'cerrado'
-                ),
-                CASE
-                    WHEN COALESCE(fr.report_state, fi.finding_state, '') = 'cerrado'
-                    THEN trim(COALESCE(d.document_date, '') || ' ' || COALESCE(d.document_time, ''))
-                    ELSE ''
-                END
-            ) AS closed_at,
+            CASE
+                WHEN d.document_type = 'estimacion' THEN ''
+                ELSE COALESCE(
+                    (
+                        SELECT MIN(a.event_at)
+                        FROM audit_logs a
+                        WHERE a.entity_type = CASE
+                                WHEN d.document_type = 'reporte' THEN 'reporte'
+                                ELSE 'hallazgo'
+                            END
+                          AND a.entity_id = CAST(d.id AS TEXT)
+                          AND a.field_name = CASE
+                                WHEN d.document_type = 'reporte' THEN 'report_state'
+                                ELSE 'finding_state'
+                            END
+                          AND a.new_value IN ('en_atencion', 'atendido', 'cerrado')
+                    ),
+                    CASE
+                        WHEN COALESCE(fr.report_state, fi.finding_state, '') IN ('en_atencion', 'atendido', 'cerrado')
+                        THEN trim(COALESCE(d.document_date, '') || ' ' || COALESCE(d.document_time, ''))
+                        ELSE ''
+                    END
+                )
+            END AS attended_at,
+            CASE
+                WHEN d.document_type = 'estimacion' THEN ''
+                ELSE COALESCE(
+                    (
+                        SELECT MIN(a.event_at)
+                        FROM audit_logs a
+                        WHERE a.entity_type = CASE
+                                WHEN d.document_type = 'reporte' THEN 'reporte'
+                                ELSE 'hallazgo'
+                            END
+                          AND a.entity_id = CAST(d.id AS TEXT)
+                          AND a.field_name = CASE
+                                WHEN d.document_type = 'reporte' THEN 'report_state'
+                                ELSE 'finding_state'
+                            END
+                          AND a.new_value = 'cerrado'
+                    ),
+                    CASE
+                        WHEN COALESCE(fr.report_state, fi.finding_state, '') = 'cerrado'
+                        THEN trim(COALESCE(d.document_date, '') || ' ' || COALESCE(d.document_time, ''))
+                        ELSE ''
+                    END
+                )
+            END AS closed_at,
             d.tower,
             p.name AS position_name,
             d.equipment_text_original,
@@ -128,10 +157,11 @@ def list_report_ticket_rows(connection: Connection, filters: dict) -> list[dict]
             d.equipment_key,
             cd.case_id,
             c.case_folio,
-            COALESCE(fr.report_state, fi.finding_state, '') AS current_status,
+            COALESCE(fr.report_state, fi.finding_state, es.estimate_state, '') AS current_status,
             CASE
                 WHEN d.document_type = 'reporte' THEN COALESCE(fr.ticket_number, d.primary_identifier, '')
                 WHEN d.document_type = 'hallazgo' THEN COALESCE(fi.base_ticket_number, fi.finding_folio, d.primary_identifier, '')
+                WHEN d.document_type = 'estimacion' THEN COALESCE(es.normalized_folio, es.original_folio, d.primary_identifier, '')
                 ELSE COALESCE(d.primary_identifier, '')
             END AS source_reference,
             COALESCE(
@@ -140,26 +170,31 @@ def list_report_ticket_rows(connection: Connection, filters: dict) -> list[dict]
                 d.short_description,
                 fr.description,
                 fi.description,
+                {ESTIMATE_CONCEPT_SUMMARY_SQL},
                 ''
             ) AS summary_text,
-            COALESCE(
-                (
-                    SELECT SUM(estimate_total)
-                    FROM (
-                        SELECT DISTINCT
-                            e2.document_id,
-                            COALESCE(e2.total_amount, 0) AS estimate_total
-                        FROM case_documents cd2
-                        JOIN estimates e2 ON e2.document_id = cd2.document_id
-                        WHERE cd2.case_id = cd.case_id
-                    )
-                ),
-                0
-            ) AS quoted_amount
+            CASE
+                WHEN d.document_type = 'estimacion' THEN COALESCE(es.total_amount, 0)
+                ELSE COALESCE(
+                    (
+                        SELECT SUM(estimate_total)
+                        FROM (
+                            SELECT DISTINCT
+                                e2.document_id,
+                                COALESCE(e2.total_amount, 0) AS estimate_total
+                            FROM case_documents cd2
+                            JOIN estimates e2 ON e2.document_id = cd2.document_id
+                            WHERE cd2.case_id = cd.case_id
+                        )
+                    ),
+                    0
+                )
+            END AS quoted_amount
         FROM documents d
         LEFT JOIN positions p ON p.id = d.position_id
         LEFT JOIN fault_reports fr ON fr.document_id = d.id
         LEFT JOIN findings fi ON fi.document_id = d.id
+        LEFT JOIN estimates es ON es.document_id = d.id
         LEFT JOIN case_documents cd ON cd.document_id = d.id
         LEFT JOIN cases c ON c.id = cd.case_id
         WHERE {" AND ".join(clauses)}

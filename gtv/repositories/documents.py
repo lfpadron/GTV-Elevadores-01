@@ -7,6 +7,24 @@ from sqlite3 import Connection
 from gtv.utils.equipment import EQUIPMENT_OTHER_FILTER_VALUE, catalog_equipment_codes, resolve_equipment_code_alias
 
 
+ESTIMATE_CONCEPT_SUMMARY_SQL = """
+COALESCE(
+    (
+        SELECT group_concat(concept_text, ' | ')
+        FROM (
+            SELECT ei2.concept_text AS concept_text
+            FROM estimate_items ei2
+            WHERE ei2.estimate_document_id = d.id
+              AND COALESCE(ei2.concept_text, '') <> ''
+            ORDER BY ei2.line_number ASC
+            LIMIT 3
+        ) concept_rows
+    ),
+    ''
+)
+"""
+
+
 def list_positions(connection: Connection) -> list[dict]:
     rows = connection.execute(
         "SELECT * FROM positions WHERE is_active = 1 ORDER BY name"
@@ -142,30 +160,40 @@ def list_loaded_documents(connection: Connection, filters: dict) -> list[dict]:
             p.name AS position_name,
             d.equipment_text_original,
             d.equipment_code,
+            CASE
+                WHEN d.document_type = 'reporte' THEN COALESCE(fr.ticket_number, d.primary_identifier, '')
+                WHEN d.document_type = 'hallazgo' THEN COALESCE(fi.base_ticket_number, fi.finding_folio, d.primary_identifier, '')
+                WHEN d.document_type = 'estimacion' THEN COALESCE(es.normalized_folio, es.original_folio, d.primary_identifier, '')
+                ELSE COALESCE(d.primary_identifier, '')
+            END AS source_reference,
+            d.primary_identifier,
             d.duplicate_status,
             d.document_status,
             d.inclusion_status,
+            CASE
+                WHEN d.document_type = 'reporte' THEN COALESCE(fr.cause_text, fr.description, d.short_description, '')
+                WHEN d.document_type = 'hallazgo' THEN COALESCE(fi.description, fi.affected_part_text, d.short_description, '')
+                WHEN d.document_type = 'estimacion' THEN COALESCE(d.summary_user_edited, d.summary_ai_original, d.short_description, '')
+                ELSE COALESCE(d.short_description, '')
+            END AS cause_text,
+            CASE
+                WHEN d.document_type = 'reporte' THEN COALESCE(fr.solution_text, '')
+                WHEN d.document_type = 'hallazgo' THEN COALESCE(fi.recommendation_text, '')
+                WHEN d.document_type = 'estimacion' THEN {ESTIMATE_CONCEPT_SUMMARY_SQL}
+                ELSE ''
+            END AS recommendation_text,
             COALESCE(
                 d.short_description,
                 fr.description,
                 fi.description,
-                (
-                    SELECT group_concat(ei.concept_text, ' | ')
-                    FROM (
-                        SELECT concept_text
-                        FROM estimate_items ei
-                        WHERE ei.estimate_document_id = d.id
-                          AND COALESCE(ei.concept_text, '') <> ''
-                        ORDER BY ei.line_number ASC
-                        LIMIT 3
-                    ) ei
-                ),
+                {ESTIMATE_CONCEPT_SUMMARY_SQL},
                 ''
             ) AS concise_description
         FROM documents d
         LEFT JOIN positions p ON p.id = d.position_id
         LEFT JOIN fault_reports fr ON fr.document_id = d.id
         LEFT JOIN findings fi ON fi.document_id = d.id
+        LEFT JOIN estimates es ON es.document_id = d.id
         WHERE {" AND ".join(clauses)}
         ORDER BY d.document_date DESC, d.document_time DESC, d.id DESC
         """,

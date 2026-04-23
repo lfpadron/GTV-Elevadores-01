@@ -5,7 +5,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from gtv.constants import FINDING_STATES, REPORT_STATES
+from gtv.constants import ESTIMATE_STATES, FINDING_STATES, REPORT_STATES
 from gtv.models import AuthenticatedUser
 from gtv.repositories import documents as document_repo
 from gtv.repositories import listings as listings_repo
@@ -21,6 +21,8 @@ from gtv.views.common import (
     tower_filter_selectbox,
 )
 
+DOCUMENT_TYPE_OPTIONS = ["", "reporte", "hallazgo", "estimacion"]
+
 
 def render(connection, user: AuthenticatedUser) -> None:
     st.header("Reporte de tickets y hallazgos")
@@ -29,16 +31,22 @@ def render(connection, user: AuthenticatedUser) -> None:
     if "report_ticket_filters" not in st.session_state:
         st.session_state["report_ticket_filters"] = {}
 
-    state_options = [""] + list(dict.fromkeys([*REPORT_STATES, *FINDING_STATES]))
+    state_options = [""] + list(dict.fromkeys([*REPORT_STATES, *FINDING_STATES, *ESTIMATE_STATES]))
     with st.form("report-ticket-filters"):
         date_range = st.date_input("Rango de fechas", value=(), key="report-ticket-dates")
-        cols = st.columns(4)
+        cols = st.columns(5)
         with cols[0]:
             tower = tower_filter_selectbox("Torre", key="report-ticket-tower")
         with cols[1]:
-            equipment = equipment_filter_selectbox("Equipo", key="report-ticket-equipment")
+            equipment = equipment_filter_selectbox("Equipo", key="report-ticket-equipment", include_other=True)
         state = cols[2].selectbox("Estado", options=state_options, key="report-ticket-state")
         ticket = cols[3].text_input("Ticket / hallazgo", key="report-ticket-ticket")
+        document_type = cols[4].selectbox(
+            "Tipo de documento",
+            options=DOCUMENT_TYPE_OPTIONS,
+            key="report-ticket-document-type",
+            format_func=lambda value: "Todos" if value == "" else _document_type_label(value),
+        )
         submitted = st.form_submit_button("Aplicar filtros")
 
     if submitted:
@@ -49,6 +57,7 @@ def render(connection, user: AuthenticatedUser) -> None:
             "equipment": equipment or None,
             "state": state or None,
             "ticket": ticket or None,
+            "document_type": document_type or None,
         }
         mark_user_activity(connection)
         connection.commit()
@@ -91,7 +100,7 @@ def render(connection, user: AuthenticatedUser) -> None:
 
     selected_rows = edited_df[edited_df["Seleccionar"] == True]
     if len(selected_rows) > 1:
-        st.warning("Selecciona solo un ticket/hallazgo a la vez. Se mostrará el primero marcado.")
+        st.warning("Selecciona solo un documento a la vez. Se mostrará el primero marcado.")
     if not selected_rows.empty:
         selected_document_id = int(selected_rows.iloc[0]["document_id"])
         st.session_state["selected_report_ticket_document_id"] = selected_document_id
@@ -117,6 +126,7 @@ def render(connection, user: AuthenticatedUser) -> None:
             "equipment": "Equipo",
             "state": "Estado",
             "ticket": "Ticket / hallazgo",
+            "document_type": "Tipo de documento",
         },
     )
     excel_bytes, pdf_bytes = export_service.export_report_ticket_report(report_rows, criteria_lines=criteria_lines)
@@ -136,7 +146,7 @@ def render(connection, user: AuthenticatedUser) -> None:
 
     selected_row = next((row for row in rows if row["document_id"] == selected_document_id), None)
     if not selected_row:
-        st.info("Selecciona un ticket/hallazgo para revisar su detalle.")
+        st.info("Selecciona un documento para revisar su detalle.")
         return
 
     st.subheader("Detalle documental")
@@ -188,14 +198,21 @@ def _bundle_for_document(connection, document_id: int, case_id: int | None) -> d
         return {"reports": [], "finding_documents": [], "estimate_documents": []}
     if document["document_type"] == "reporte":
         return {"reports": [document], "finding_documents": [], "estimate_documents": []}
-    return {"reports": [], "finding_documents": [document], "estimate_documents": []}
+    if document["document_type"] == "hallazgo":
+        return {"reports": [], "finding_documents": [document], "estimate_documents": []}
+    return {
+        "reports": [],
+        "finding_documents": [],
+        "estimate_documents": [document],
+        "estimate_items": document_repo.list_estimate_items(connection, document_id),
+    }
 
 
 def _build_report_rows(rows: list[dict]) -> list[dict]:
     return [
         {
             "Número de ticket": row.get("source_reference") or "",
-            "Si es de reporte o de hallazgo": row.get("document_type") or "",
+            "Tipo de documento": _document_type_label(row.get("document_type") or ""),
             "Código de equipo": row.get("equipment_code") or "",
             "Torre y equipo": _equipment_label(row),
             "Fecha de apertura": row.get("opened_at") or "",
@@ -205,6 +222,15 @@ def _build_report_rows(rows: list[dict]) -> list[dict]:
         }
         for row in rows
     ]
+
+
+def _document_type_label(value: str) -> str:
+    labels = {
+        "reporte": "Reporte",
+        "hallazgo": "Hallazgo",
+        "estimacion": "Estimación",
+    }
+    return labels.get(value, value.title())
 
 
 def _equipment_label(row: dict) -> str:

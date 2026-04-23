@@ -25,7 +25,7 @@ DOCUMENT_TYPE_OPTIONS = ["", "reporte", "hallazgo", "estimacion"]
 
 
 def render(connection, user: AuthenticatedUser) -> None:
-    st.header("Reporte de hallazgos")
+    st.header("Reporte de fallas")
     st.caption("Correlaciona rápidamente equipo y documento que lo menciona, con exportación y previsualización.")
 
     if "finding_report_filters" not in st.session_state:
@@ -144,20 +144,20 @@ def render(connection, user: AuthenticatedUser) -> None:
     )
     excel_bytes, pdf_bytes = export_service.export_item_tracking_report(
         export_rows,
-        title="Reporte de hallazgos",
+        title="Reporte de fallas",
         criteria_lines=criteria_lines,
     )
     export_cols = st.columns(2)
     export_cols[0].download_button(
         "Exportar tabla a Excel",
         data=excel_bytes,
-        file_name=export_service.export_filename("reporte_hallazgos", "xlsx"),
+        file_name=export_service.export_filename("reporte_fallas", "xlsx"),
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
     export_cols[1].download_button(
         "Exportar tabla a PDF",
         data=pdf_bytes,
-        file_name=export_service.export_filename("reporte_hallazgos", "pdf"),
+        file_name=export_service.export_filename("reporte_fallas", "pdf"),
         mime="application/pdf",
     )
 

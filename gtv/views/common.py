@@ -26,7 +26,7 @@ from gtv.utils.equipment import (
 
 PRIMARY_NAV_PAGES = [
     "Carga de archivos",
-    "Reporte de hallazgos",
+    "Reporte de fallas",
     "Búsqueda",
     "Documentos cargados",
 ]
@@ -257,6 +257,23 @@ def render_sidebar_navigation(connection, settings: Settings, user: Authenticate
         st.session_state["nav_page"] = PRIMARY_NAV_PAGES[0]
 
     with st.sidebar:
+        st.markdown(
+            """
+            <style>
+            section[data-testid="stSidebar"] button[kind="primary"] {
+                background-color: #c62828 !important;
+                border-color: #c62828 !important;
+                color: #ffffff !important;
+            }
+            section[data-testid="stSidebar"] button[kind="primary"]:hover {
+                background-color: #b71c1c !important;
+                border-color: #b71c1c !important;
+                color: #ffffff !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
         st.markdown(f"**{user.preferred_name}**")
         _render_sidebar_timeout_panel(connection, settings, user)
         st.divider()
@@ -281,6 +298,7 @@ def _render_nav_button(page: str) -> None:
         type="primary" if is_active else "secondary",
     ):
         st.session_state["nav_page"] = page
+        st.rerun()
 
 
 def _format_seconds_as_clock(total_seconds: int) -> str:

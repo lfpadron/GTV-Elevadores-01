@@ -18,6 +18,8 @@ from gtv.views.common import (
     tower_filter_selectbox,
 )
 
+DOCUMENT_TYPE_OPTIONS = ["", "reporte", "hallazgo", "estimacion"]
+
 
 def _origin_label(row: dict) -> str:
     source_type = row.get("document_type") or ""
@@ -29,6 +31,15 @@ def _origin_label(row: dict) -> str:
     if source_type == "estimacion":
         return f"Estimación {reference}"
     return f"{source_type.title()} {reference}".strip()
+
+
+def _document_type_filter_label(value: str) -> str:
+    labels = {
+        "reporte": "Reporte",
+        "hallazgo": "Hallazgo",
+        "estimacion": "Estimación",
+    }
+    return labels.get(value, value.title())
 
 
 def render(connection, user: AuthenticatedUser) -> None:
@@ -44,7 +55,13 @@ def render(connection, user: AuthenticatedUser) -> None:
                 tower = tower_filter_selectbox("Torre", key="structured-tower")
             with cols[1]:
                 equipment = equipment_filter_selectbox("Equipo", key="structured-equipment", include_other=True)
-            state = cols[2].text_input("Estado")
+            with cols[2]:
+                document_type = st.selectbox(
+                    "Tipo de documento",
+                    options=DOCUMENT_TYPE_OPTIONS,
+                    key="structured-document-type",
+                    format_func=lambda value: "Todos" if value == "" else _document_type_filter_label(value),
+                )
             with cols[3]:
                 inclusion_status = inclusion_filter_selectbox("Incluidos / ignorados", key="structured-inclusion")
             submit_structured = cols[4].form_submit_button("Buscar")
@@ -57,7 +74,7 @@ def render(connection, user: AuthenticatedUser) -> None:
                 "ticket_or_identifier": ticket or None,
                 "tower": tower or None,
                 "equipment": equipment or None,
-                "state": state or None,
+                "document_type": document_type or None,
                 "inclusion_status": inclusion_status or None,
             }
             st.session_state["structured_search_filters"] = filters
@@ -87,6 +104,8 @@ def render(connection, user: AuthenticatedUser) -> None:
                     "equipo": row.get("equipment_text_original") or row.get("position_name") or "",
                     "estado": row.get("current_state") or "",
                     "incluido_ignorado": (row.get("inclusion_status") or "incluido").title(),
+                    "causa": row.get("cause_text") or "",
+                    "recomendacion": row.get("recommendation_text") or "",
                     "documento_original": row.get("file_name_original") or "",
                     "descripcion_sucinta": row.get("concise_description") or row.get("short_description") or "",
                 }
@@ -120,7 +139,7 @@ def render(connection, user: AuthenticatedUser) -> None:
                     "ticket_or_identifier": "Ticket o identificador",
                     "tower": "Torre",
                     "equipment": "Equipo",
-                    "state": "Estado",
+                    "document_type": "Tipo de documento",
                     "inclusion_status": "Incluidos / ignorados",
                 },
             )
@@ -153,19 +172,27 @@ def render(connection, user: AuthenticatedUser) -> None:
     with text_tab:
         with st.form("fts-search-form"):
             free_text = st.text_input("Texto libre")
-            cols = st.columns(4)
+            cols = st.columns(5)
             with cols[0]:
                 tower_fts = tower_filter_selectbox("Torre (opcional)", key="tower-fts")
             with cols[1]:
                 equipment_fts = equipment_filter_selectbox("Equipo (opcional)", key="equipment-fts", include_other=True)
             with cols[2]:
+                document_type_fts = st.selectbox(
+                    "Tipo de documento",
+                    options=DOCUMENT_TYPE_OPTIONS,
+                    key="fts-document-type",
+                    format_func=lambda value: "Todos" if value == "" else _document_type_filter_label(value),
+                )
+            with cols[3]:
                 inclusion_fts = inclusion_filter_selectbox("Incluidos / ignorados", key="fts-inclusion")
-            submit_fts = cols[3].form_submit_button("Buscar en texto")
+            submit_fts = cols[4].form_submit_button("Buscar en texto")
         if submit_fts and free_text:
             filters = {
                 "free_text": free_text,
                 "tower": tower_fts or None,
                 "equipment": equipment_fts or None,
+                "document_type": document_type_fts or None,
                 "inclusion_status": inclusion_fts or None,
             }
             results, error = search_service.run_full_text_search(connection, filters)
@@ -188,6 +215,8 @@ def render(connection, user: AuthenticatedUser) -> None:
                 {
                     "Seleccionar": f"{row['document_id']}:{row['page_number']}" == selected_result_key,
                     "result_key": f"{row['document_id']}:{row['page_number']}",
+                    "causa": row.get("cause_text") or "",
+                    "recomendacion": row.get("recommendation_text") or "",
                     "documento_original": row.get("file_name_original") or "",
                     "pagina": row.get("page_number") or 0,
                     "origen_documental": _origin_label(row),

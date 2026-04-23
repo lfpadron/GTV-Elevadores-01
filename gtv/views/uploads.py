@@ -15,6 +15,11 @@ def render(connection, settings: Settings, user: AuthenticatedUser) -> None:
     st.header("Carga de archivos")
     st.caption("La carga masiva procesa todos los PDFs y deja incidencias para revision posterior.")
 
+    recent_upload_results = st.session_state.get("uploaded_files_last_results")
+    if recent_upload_results:
+        st.success(f"Procesados {len(recent_upload_results)} archivo(s).")
+        st.dataframe(pd.DataFrame(recent_upload_results), use_container_width=True)
+
     staging_folder = settings.data_dir / "por_procesar"
     staging_files = sorted(staging_folder.rglob("*.pdf")) if staging_folder.exists() else []
     if staging_folder.exists():
@@ -34,10 +39,12 @@ def render(connection, settings: Settings, user: AuthenticatedUser) -> None:
             except Exception as exc:  # pragma: no cover - depende de PDFs reales.
                 st.error(f"No fue posible procesar la carpeta: {exc}")
 
+    uploader_nonce = int(st.session_state.get("uploads_file_uploader_nonce", 0))
     uploaded_files = st.file_uploader(
         "Arrastra uno o varios PDFs",
         type=["pdf"],
         accept_multiple_files=True,
+        key=f"uploads-file-uploader-{uploader_nonce}",
     )
     process = st.button("Procesar carga")
 
@@ -65,7 +72,8 @@ def render(connection, settings: Settings, user: AuthenticatedUser) -> None:
                 )
         mark_user_activity(connection)
         connection.commit()
-        st.success(f"Procesados {len(results)} archivo(s).")
-        st.dataframe(pd.DataFrame(results), use_container_width=True)
+        st.session_state["uploaded_files_last_results"] = results
+        st.session_state["uploads_file_uploader_nonce"] = uploader_nonce + 1
+        st.rerun()
     elif process:
         st.warning("Selecciona al menos un PDF.")

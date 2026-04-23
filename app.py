@@ -49,7 +49,7 @@ if page == "Carga de archivos":
     uploads.render(connection, settings, user)
 elif page == "Listado de reportes/tickets":
     report_tickets.render(connection, user)
-elif page == "Reporte de hallazgos":
+elif page == "Reporte de fallas":
     report_hallazgos.render(connection, user)
 elif page == "Listado de estimaciones":
     estimate_listing.render(connection, user)
