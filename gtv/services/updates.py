@@ -222,6 +222,35 @@ def update_summary(
     )
 
 
+def update_document_inclusion_status(
+    connection: Connection,
+    *,
+    document_id: int,
+    inclusion_status: str,
+    user: AuthenticatedUser,
+) -> None:
+    document = document_repo.get_document(connection, document_id)
+    if not document:
+        raise ValueError("Documento no encontrado")
+
+    payload = {"inclusion_status": inclusion_status}
+    if inclusion_status == "incluido" and document.get("document_status") == "descartado":
+        payload["document_status"] = "activo"
+        if document.get("duplicate_status") and document.get("duplicate_status") != "original":
+            payload["duplicate_status"] = "kept_duplicate"
+
+    audit_diff(
+        connection,
+        user_email=user.email,
+        entity_type="document",
+        entity_id=str(document_id),
+        before=document,
+        after=payload,
+        context="Actualizacion manual de inclusion documental",
+    )
+    document_repo.update_document_fields(connection, document_id, payload)
+
+
 def update_user_status(
     connection: Connection,
     *,

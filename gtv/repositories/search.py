@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from sqlite3 import Connection, OperationalError
 
-from gtv.utils.equipment import resolve_equipment_code_alias
+from gtv.utils.equipment import EQUIPMENT_OTHER_FILTER_VALUE, catalog_equipment_codes, resolve_equipment_code_alias
 
 
 def search_documents(connection: Connection, filters: dict) -> list[dict]:
-    clauses = ["d.document_status = 'activo'"]
+    clauses = ["1 = 1"]
     params: list[object] = []
 
     if filters.get("date_from"):
@@ -36,24 +36,34 @@ def search_documents(connection: Connection, filters: dict) -> list[dict]:
         clauses.append("COALESCE(d.tower, '') = ?")
         params.append(filters["tower"])
     if filters.get("equipment"):
-        resolved_code = resolve_equipment_code_alias(filters["equipment"])
-        if resolved_code:
-            clauses.append("COALESCE(d.equipment_code, d.equipment_key, '') = ?")
-            params.append(resolved_code)
-        else:
+        if filters["equipment"] == EQUIPMENT_OTHER_FILTER_VALUE:
+            known_codes = [code.upper() for code in catalog_equipment_codes()]
+            placeholders = ", ".join("?" for _ in known_codes)
             clauses.append(
-                """
+                f"""
                 (
-                    COALESCE(d.equipment_text_original, '') LIKE ?
-                    OR COALESCE(d.equipment_key, '') LIKE ?
-                    OR COALESCE(d.equipment_code, '') LIKE ?
+                    NULLIF(COALESCE(d.equipment_code, ''), '') IS NULL
+                    OR UPPER(COALESCE(d.equipment_code, '')) NOT IN ({placeholders})
                 )
                 """
             )
-            params.extend([f"%{filters['equipment']}%"] * 3)
-    if filters.get("position"):
-        clauses.append("COALESCE(p.name, '') = ?")
-        params.append(filters["position"])
+            params.extend(known_codes)
+        else:
+            resolved_code = resolve_equipment_code_alias(filters["equipment"])
+            if resolved_code:
+                clauses.append("COALESCE(d.equipment_code, d.equipment_key, '') = ?")
+                params.append(resolved_code)
+            else:
+                clauses.append(
+                    """
+                    (
+                        COALESCE(d.equipment_text_original, '') LIKE ?
+                        OR COALESCE(d.equipment_key, '') LIKE ?
+                        OR COALESCE(d.equipment_code, '') LIKE ?
+                    )
+                    """
+                )
+                params.extend([f"%{filters['equipment']}%"] * 3)
     if filters.get("state"):
         clauses.append(
             """
@@ -63,6 +73,9 @@ def search_documents(connection: Connection, filters: dict) -> list[dict]:
             """
         )
         params.append(filters["state"])
+    if filters.get("inclusion_status"):
+        clauses.append("COALESCE(d.inclusion_status, 'incluido') = ?")
+        params.append(filters["inclusion_status"])
 
     where_clause = " AND ".join(clauses)
     rows = connection.execute(
@@ -84,6 +97,7 @@ def search_documents(connection: Connection, filters: dict) -> list[dict]:
             p.name AS position_name,
             d.equipment_text_original,
             d.equipment_code,
+            d.inclusion_status,
             COALESCE(fr.report_state, fi.finding_state, es.estimate_state, '') AS current_state,
             d.short_description,
             COALESCE(d.summary_user_edited, d.summary_ai_original, d.short_description, '') AS detail_summary,
@@ -122,24 +136,37 @@ def search_document_pages(connection: Connection, filters: dict) -> tuple[list[d
         clauses.append("COALESCE(d.tower, '') = ?")
         params.append(filters["tower"])
     if filters.get("equipment"):
-        resolved_code = resolve_equipment_code_alias(filters["equipment"])
-        if resolved_code:
-            clauses.append("COALESCE(d.equipment_code, d.equipment_key, '') = ?")
-            params.append(resolved_code)
-        else:
+        if filters["equipment"] == EQUIPMENT_OTHER_FILTER_VALUE:
+            known_codes = [code.upper() for code in catalog_equipment_codes()]
+            placeholders = ", ".join("?" for _ in known_codes)
             clauses.append(
-                """
+                f"""
                 (
-                    COALESCE(d.equipment_text_original, '') LIKE ?
-                    OR COALESCE(d.equipment_key, '') LIKE ?
-                    OR COALESCE(d.equipment_code, '') LIKE ?
+                    NULLIF(COALESCE(d.equipment_code, ''), '') IS NULL
+                    OR UPPER(COALESCE(d.equipment_code, '')) NOT IN ({placeholders})
                 )
                 """
             )
-            params.extend([f"%{filters['equipment']}%"] * 3)
-    if filters.get("position"):
-        clauses.append("COALESCE(p.name, '') = ?")
-        params.append(filters["position"])
+            params.extend(known_codes)
+        else:
+            resolved_code = resolve_equipment_code_alias(filters["equipment"])
+            if resolved_code:
+                clauses.append("COALESCE(d.equipment_code, d.equipment_key, '') = ?")
+                params.append(resolved_code)
+            else:
+                clauses.append(
+                    """
+                    (
+                        COALESCE(d.equipment_text_original, '') LIKE ?
+                        OR COALESCE(d.equipment_key, '') LIKE ?
+                        OR COALESCE(d.equipment_code, '') LIKE ?
+                    )
+                    """
+                )
+                params.extend([f"%{filters['equipment']}%"] * 3)
+    if filters.get("inclusion_status"):
+        clauses.append("COALESCE(d.inclusion_status, 'incluido') = ?")
+        params.append(filters["inclusion_status"])
 
     where_clause = " AND ".join(clauses)
     try:
@@ -153,6 +180,7 @@ def search_document_pages(connection: Connection, filters: dict) -> tuple[list[d
                 dp.page_text,
                 d.document_type,
                 d.document_date,
+                d.inclusion_status,
                 d.primary_identifier,
                 CASE
                     WHEN d.document_type = 'reporte' THEN COALESCE(fr.ticket_number, d.primary_identifier, '')

@@ -45,6 +45,21 @@ def _run_pre_schema_migrations(connection) -> None:
         connection.execute(
             "ALTER TABLE documents ADD COLUMN equipment_code TEXT"
         )
+    if _table_exists(connection, "documents") and not _column_exists(connection, "documents", "inclusion_status"):
+        connection.execute(
+            "ALTER TABLE documents ADD COLUMN inclusion_status TEXT NOT NULL DEFAULT 'incluido'"
+        )
+        connection.execute(
+            """
+            UPDATE documents
+            SET inclusion_status = CASE
+                WHEN COALESCE(duplicate_status, 'original') <> 'original'
+                     OR COALESCE(document_status, 'activo') = 'descartado'
+                THEN 'ignorado'
+                ELSE 'incluido'
+            END
+            """
+        )
 
 
 def _run_safe_migrations(connection) -> None:
@@ -69,6 +84,21 @@ def _run_safe_migrations(connection) -> None:
     if _table_exists(connection, "documents") and not _column_exists(connection, "documents", "equipment_code"):
         connection.execute(
             "ALTER TABLE documents ADD COLUMN equipment_code TEXT"
+        )
+    if _table_exists(connection, "documents") and not _column_exists(connection, "documents", "inclusion_status"):
+        connection.execute(
+            "ALTER TABLE documents ADD COLUMN inclusion_status TEXT NOT NULL DEFAULT 'incluido'"
+        )
+        connection.execute(
+            """
+            UPDATE documents
+            SET inclusion_status = CASE
+                WHEN COALESCE(duplicate_status, 'original') <> 'original'
+                     OR COALESCE(document_status, 'activo') = 'descartado'
+                THEN 'ignorado'
+                ELSE 'incluido'
+            END
+            """
         )
 
 

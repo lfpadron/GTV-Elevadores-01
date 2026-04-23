@@ -12,6 +12,7 @@ from gtv.views import (
     cases,
     estimate_listing,
     incidents,
+    loaded_documents,
     linking,
     login,
     matching,
@@ -58,6 +59,8 @@ elif page == "Incidencias":
     incidents.render(connection, settings, user)
 elif page == "Búsqueda":
     search.render(connection, user)
+elif page == "Documentos cargados":
+    loaded_documents.render(connection, user)
 elif page == "Listado de casos":
     cases.render(connection)
 elif page == "Detalle de caso":

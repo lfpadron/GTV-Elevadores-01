@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from sqlite3 import Connection
 
+from gtv.utils.equipment import EQUIPMENT_OTHER_FILTER_VALUE, catalog_equipment_codes, resolve_equipment_code_alias
+
 
 def list_positions(connection: Connection) -> list[dict]:
     rows = connection.execute(
@@ -76,6 +78,111 @@ def get_document_with_details(connection: Connection, document_id: int) -> dict 
         row = None
     document["details"] = dict(row) if row else {}
     return document
+
+
+def list_loaded_documents(connection: Connection, filters: dict) -> list[dict]:
+    clauses = ["1 = 1"]
+    params: list[object] = []
+
+    if filters.get("date_from"):
+        clauses.append("d.document_date >= ?")
+        params.append(filters["date_from"])
+    if filters.get("date_to"):
+        clauses.append("d.document_date <= ?")
+        params.append(filters["date_to"])
+    if filters.get("tower"):
+        clauses.append("COALESCE(d.tower, '') = ?")
+        params.append(filters["tower"])
+    if filters.get("equipment"):
+        if filters["equipment"] == EQUIPMENT_OTHER_FILTER_VALUE:
+            known_codes = [code.upper() for code in catalog_equipment_codes()]
+            placeholders = ", ".join("?" for _ in known_codes)
+            clauses.append(
+                f"""
+                (
+                    NULLIF(COALESCE(d.equipment_code, ''), '') IS NULL
+                    OR UPPER(COALESCE(d.equipment_code, '')) NOT IN ({placeholders})
+                )
+                """
+            )
+            params.extend(known_codes)
+        else:
+            resolved_code = resolve_equipment_code_alias(filters["equipment"])
+            if resolved_code:
+                clauses.append("COALESCE(d.equipment_code, d.equipment_key, '') = ?")
+                params.append(resolved_code)
+            else:
+                clauses.append(
+                    """
+                    (
+                        COALESCE(d.equipment_text_original, '') LIKE ?
+                        OR COALESCE(d.equipment_key, '') LIKE ?
+                        OR COALESCE(d.equipment_code, '') LIKE ?
+                    )
+                    """
+                )
+                params.extend([f"%{filters['equipment']}%"] * 3)
+    if filters.get("document_type"):
+        if filters["document_type"] == "duplicado":
+            clauses.append("COALESCE(d.duplicate_status, 'original') <> 'original'")
+        else:
+            clauses.append("d.document_type = ?")
+            params.append(filters["document_type"])
+
+    rows = connection.execute(
+        f"""
+        SELECT
+            d.id AS document_id,
+            d.document_date,
+            d.document_time,
+            d.document_type,
+            d.file_name_original,
+            d.storage_path,
+            d.tower,
+            p.name AS position_name,
+            d.equipment_text_original,
+            d.equipment_code,
+            d.duplicate_status,
+            d.document_status,
+            d.inclusion_status,
+            COALESCE(
+                d.short_description,
+                fr.description,
+                fi.description,
+                (
+                    SELECT group_concat(ei.concept_text, ' | ')
+                    FROM (
+                        SELECT concept_text
+                        FROM estimate_items ei
+                        WHERE ei.estimate_document_id = d.id
+                          AND COALESCE(ei.concept_text, '') <> ''
+                        ORDER BY ei.line_number ASC
+                        LIMIT 3
+                    ) ei
+                ),
+                ''
+            ) AS concise_description
+        FROM documents d
+        LEFT JOIN positions p ON p.id = d.position_id
+        LEFT JOIN fault_reports fr ON fr.document_id = d.id
+        LEFT JOIN findings fi ON fi.document_id = d.id
+        WHERE {" AND ".join(clauses)}
+        ORDER BY d.document_date DESC, d.document_time DESC, d.id DESC
+        """,
+        params,
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def update_document_inclusion_status(connection: Connection, document_id: int, inclusion_status: str) -> None:
+    connection.execute(
+        """
+        UPDATE documents
+        SET inclusion_status = ?
+        WHERE id = ?
+        """,
+        (inclusion_status, document_id),
+    )
 
 
 def find_existing_named_documents(

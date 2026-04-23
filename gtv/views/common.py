@@ -18,6 +18,7 @@ from gtv.repositories import notifications as notification_repo
 from gtv.repositories import users as user_repo
 from gtv.services import auth as auth_service
 from gtv.utils.equipment import (
+    EQUIPMENT_OTHER_FILTER_VALUE,
     format_equipment_filter_option,
     list_equipment_filter_codes,
     list_tower_filter_options,
@@ -27,6 +28,7 @@ PRIMARY_NAV_PAGES = [
     "Carga de archivos",
     "Reporte de hallazgos",
     "Búsqueda",
+    "Documentos cargados",
 ]
 
 SECONDARY_NAV_PAGES = [
@@ -165,13 +167,31 @@ def tower_filter_selectbox(label: str, *, key: str, include_all: bool = True) ->
     ) or None
 
 
-def equipment_filter_selectbox(label: str, *, key: str, include_all: bool = True) -> str | None:
+def equipment_filter_selectbox(
+    label: str,
+    *,
+    key: str,
+    include_all: bool = True,
+    include_other: bool = False,
+) -> str | None:
     options = ([""] if include_all else []) + list_equipment_filter_codes()
+    if include_other:
+        options.append(EQUIPMENT_OTHER_FILTER_VALUE)
     return st.selectbox(
         label,
         options=options,
         key=key,
         format_func=lambda value: "Todos" if value == "" else format_equipment_filter_option(value),
+    ) or None
+
+
+def inclusion_filter_selectbox(label: str, *, key: str, include_all: bool = True) -> str | None:
+    options = ([""] if include_all else []) + ["incluido", "ignorado"]
+    return st.selectbox(
+        label,
+        options=options,
+        key=key,
+        format_func=lambda value: "Todos" if value == "" else value.title(),
     ) or None
 
 

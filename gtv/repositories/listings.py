@@ -492,7 +492,7 @@ def list_estimate_rows(connection: Connection, filters: dict) -> list[dict]:
 
 def list_hallazgo_report_rows(connection: Connection, filters: dict) -> list[dict]:
     clauses = [
-        "d.document_status = 'activo'",
+        "1 = 1",
         "d.document_type IN ('reporte', 'hallazgo', 'estimacion')",
     ]
     params: list[object] = []
@@ -538,6 +538,9 @@ def list_hallazgo_report_rows(connection: Connection, filters: dict) -> list[dic
     if filters.get("document_type"):
         clauses.append("d.document_type = ?")
         params.append(filters["document_type"])
+    if filters.get("inclusion_status"):
+        clauses.append("COALESCE(d.inclusion_status, 'incluido') = ?")
+        params.append(filters["inclusion_status"])
 
     rows = connection.execute(
         f"""
@@ -553,6 +556,7 @@ def list_hallazgo_report_rows(connection: Connection, filters: dict) -> list[dic
             d.equipment_text_original,
             d.equipment_code,
             d.equipment_key,
+            d.inclusion_status,
             CASE
                 WHEN d.document_type = 'reporte' THEN COALESCE(fr.cause_text, fr.description, d.short_description, '')
                 WHEN d.document_type = 'hallazgo' THEN COALESCE(fi.description, fi.affected_part_text, d.short_description, '')

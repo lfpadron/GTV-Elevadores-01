@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS documents (
     extraction_status TEXT NOT NULL CHECK (extraction_status IN ('ok', 'parcial', 'requiere_revision')),
     duplicate_status TEXT NOT NULL DEFAULT 'original' CHECK (duplicate_status IN ('original', 'pending_review', 'kept_duplicate', 'discarded')),
     document_status TEXT NOT NULL DEFAULT 'activo' CHECK (document_status IN ('activo', 'descartado')),
+    inclusion_status TEXT NOT NULL DEFAULT 'incluido' CHECK (inclusion_status IN ('incluido', 'ignorado')),
     file_name_original TEXT NOT NULL,
     file_name_stored TEXT NOT NULL,
     file_extension TEXT NOT NULL,

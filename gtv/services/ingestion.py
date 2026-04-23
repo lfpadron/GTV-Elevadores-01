@@ -37,6 +37,7 @@ def process_uploaded_pdf(
     )
     duplicate_of = duplicate_matches[0]["id"] if duplicate_matches else None
     duplicate_status = "pending_review" if duplicate_matches else "original"
+    inclusion_status = "ignorado" if duplicate_matches else "incluido"
 
     if duplicate_matches:
         final_folder = _resolve_date_folder(settings, "duplicado", extracted.document_date)
@@ -58,6 +59,7 @@ def process_uploaded_pdf(
             "extraction_status": extracted.extraction_status,
             "duplicate_status": duplicate_status,
             "document_status": "activo",
+            "inclusion_status": inclusion_status,
             "file_name_original": safe_name,
             "file_name_stored": stored_file_name,
             "file_extension": split_filename(safe_name)[1] or ".pdf",
@@ -213,6 +215,8 @@ def keep_duplicate_document(
             "file_name_stored": new_name,
             "storage_path": str(destination),
             "duplicate_status": "kept_duplicate",
+            "inclusion_status": "incluido",
+            "document_status": "activo",
         },
     )
     return {"file_name_stored": new_name, "storage_path": str(destination)}
@@ -225,6 +229,7 @@ def discard_duplicate_document(connection: Connection, *, document_id: int) -> N
         {
             "duplicate_status": "discarded",
             "document_status": "descartado",
+            "inclusion_status": "ignorado",
         },
     )
 

@@ -15,6 +15,7 @@ from gtv.utils.equipment import (
     list_equipment_filter_codes,
 )
 from gtv.views.common import (
+    inclusion_filter_selectbox,
     mark_user_activity,
     render_pdf_preview,
     tower_filter_selectbox,
@@ -32,7 +33,7 @@ def render(connection, user: AuthenticatedUser) -> None:
 
     with st.form("finding-report-filters"):
         date_range = st.date_input("Rango de fechas", value=(), key="finding-report-dates")
-        cols = st.columns(4)
+        cols = st.columns(5)
         with cols[0]:
             tower = tower_filter_selectbox("Torre", key="finding-report-tower")
         with cols[1]:
@@ -48,7 +49,9 @@ def render(connection, user: AuthenticatedUser) -> None:
             key="finding-report-document-type",
             format_func=lambda value: "Todos" if value == "" else value.title(),
         )
-        submitted = cols[3].form_submit_button("Aplicar filtros")
+        with cols[3]:
+            inclusion_status = inclusion_filter_selectbox("Incluidos / ignorados", key="finding-report-inclusion")
+        submitted = cols[4].form_submit_button("Aplicar filtros")
 
     if submitted:
         st.session_state["finding_report_filters"] = {
@@ -57,6 +60,7 @@ def render(connection, user: AuthenticatedUser) -> None:
             "tower": tower or None,
             "equipment": equipment or None,
             "document_type": document_type or None,
+            "inclusion_status": inclusion_status or None,
         }
         mark_user_activity(connection)
         connection.commit()
@@ -81,6 +85,7 @@ def render(connection, user: AuthenticatedUser) -> None:
             "Fecha": row.get("document_date") or "",
             "Hora": row.get("document_time") or "",
             "Tipo de documento": row.get("document_type") or "",
+            "Incluido/Ignorado": (row.get("inclusion_status") or "incluido").title(),
             "Número de ticket": row.get("ticket_number") or "No Encontrado",
             "Causa": row.get("cause_text") or "",
             "Solución": row.get("solution_text") or "",
@@ -134,6 +139,7 @@ def render(connection, user: AuthenticatedUser) -> None:
             "tower": "Torre",
             "equipment": "Equipo",
             "document_type": "Tipo de documento",
+            "inclusion_status": "Incluidos / ignorados",
         },
     )
     excel_bytes, pdf_bytes = export_service.export_item_tracking_report(
@@ -168,6 +174,7 @@ def render(connection, user: AuthenticatedUser) -> None:
     )
     detail_cols[1].metric("Ticket", selected_row.get("ticket_number") or "No Encontrado")
     detail_cols[2].metric("Equipo", _equipment_label(selected_row) or "Sin equipo")
+    st.caption(f"Estado documental: {(selected_row.get('inclusion_status') or 'incluido').title()}")
 
     if st.button("Previsualizar documento seleccionado", key=f"finding-report-preview-{selected_document_id}"):
         storage_path = selected_row.get("storage_path")

@@ -12,6 +12,7 @@ from gtv.services import exports as export_service
 from gtv.services import search as search_service
 from gtv.views.common import (
     equipment_filter_selectbox,
+    inclusion_filter_selectbox,
     mark_user_activity,
     render_pdf_preview,
     tower_filter_selectbox,
@@ -38,13 +39,15 @@ def render(connection, user: AuthenticatedUser) -> None:
         with st.form("structured-search-form"):
             date_range = st.date_input("Rango de fechas", value=())
             ticket = st.text_input("Numero de ticket o identificador")
-            cols = st.columns(4)
+            cols = st.columns(5)
             with cols[0]:
                 tower = tower_filter_selectbox("Torre", key="structured-tower")
             with cols[1]:
-                equipment = equipment_filter_selectbox("Equipo", key="structured-equipment")
+                equipment = equipment_filter_selectbox("Equipo", key="structured-equipment", include_other=True)
             state = cols[2].text_input("Estado")
-            submit_structured = cols[3].form_submit_button("Buscar")
+            with cols[3]:
+                inclusion_status = inclusion_filter_selectbox("Incluidos / ignorados", key="structured-inclusion")
+            submit_structured = cols[4].form_submit_button("Buscar")
         if submit_structured:
             date_from = date_range[0] if len(date_range) > 0 else None
             date_to = date_range[1] if len(date_range) > 1 else date_from
@@ -55,6 +58,7 @@ def render(connection, user: AuthenticatedUser) -> None:
                 "tower": tower or None,
                 "equipment": equipment or None,
                 "state": state or None,
+                "inclusion_status": inclusion_status or None,
             }
             st.session_state["structured_search_filters"] = filters
             st.session_state["structured_results"] = search_service.run_structured_search(connection, filters)
@@ -82,6 +86,7 @@ def render(connection, user: AuthenticatedUser) -> None:
                     "torre": row.get("tower") or "",
                     "equipo": row.get("equipment_text_original") or row.get("position_name") or "",
                     "estado": row.get("current_state") or "",
+                    "incluido_ignorado": (row.get("inclusion_status") or "incluido").title(),
                     "documento_original": row.get("file_name_original") or "",
                     "descripcion_sucinta": row.get("concise_description") or row.get("short_description") or "",
                 }
@@ -116,6 +121,7 @@ def render(connection, user: AuthenticatedUser) -> None:
                     "tower": "Torre",
                     "equipment": "Equipo",
                     "state": "Estado",
+                    "inclusion_status": "Incluidos / ignorados",
                 },
             )
             excel_bytes, pdf_bytes = export_service.export_search_rows(rows, criteria_lines=criteria_lines)
@@ -147,17 +153,20 @@ def render(connection, user: AuthenticatedUser) -> None:
     with text_tab:
         with st.form("fts-search-form"):
             free_text = st.text_input("Texto libre")
-            cols = st.columns(3)
+            cols = st.columns(4)
             with cols[0]:
                 tower_fts = tower_filter_selectbox("Torre (opcional)", key="tower-fts")
             with cols[1]:
-                equipment_fts = equipment_filter_selectbox("Equipo (opcional)", key="equipment-fts")
-            submit_fts = cols[2].form_submit_button("Buscar en texto")
+                equipment_fts = equipment_filter_selectbox("Equipo (opcional)", key="equipment-fts", include_other=True)
+            with cols[2]:
+                inclusion_fts = inclusion_filter_selectbox("Incluidos / ignorados", key="fts-inclusion")
+            submit_fts = cols[3].form_submit_button("Buscar en texto")
         if submit_fts and free_text:
             filters = {
                 "free_text": free_text,
                 "tower": tower_fts or None,
                 "equipment": equipment_fts or None,
+                "inclusion_status": inclusion_fts or None,
             }
             results, error = search_service.run_full_text_search(connection, filters)
             st.session_state["fts_results"] = results
@@ -182,6 +191,7 @@ def render(connection, user: AuthenticatedUser) -> None:
                     "documento_original": row.get("file_name_original") or "",
                     "pagina": row.get("page_number") or 0,
                     "origen_documental": _origin_label(row),
+                    "incluido_ignorado": (row.get("inclusion_status") or "incluido").title(),
                     "fecha_documento": row.get("document_date") or "",
                     "snippet": row.get("snippet") or "",
                 }
