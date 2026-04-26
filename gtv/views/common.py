@@ -23,6 +23,7 @@ from gtv.utils.equipment import (
     list_equipment_filter_codes,
     list_tower_filter_options,
 )
+from gtv.version import version_display_text
 
 PRIMARY_NAV_PAGES = [
     "Carga de archivos",
@@ -241,8 +242,12 @@ def get_session_timeout_minutes(connection, settings: Settings) -> int:
 
 
 def render_header(connection, settings: Settings, user: AuthenticatedUser) -> None:
-    left, right = st.columns([6, 1])
+    left, middle, right = st.columns([5, 2, 1])
     left.title(settings.app_title)
+    middle.markdown(
+        f"<div style='text-align:right; padding-top: 1rem;'><strong>{version_display_text()}</strong></div>",
+        unsafe_allow_html=True,
+    )
     if right.button("Logout", use_container_width=True):
         auth_service.logout(
             connection,

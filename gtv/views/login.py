@@ -7,11 +7,13 @@ import streamlit as st
 from gtv.app_state import set_authenticated_session
 from gtv.config import Settings
 from gtv.services import auth as auth_service
+from gtv.version import version_display_text
 
 
 def render(connection, settings: Settings) -> None:
     st.title("Ingreso local")
     st.caption("Acceso con OTP por correo y flujo de aprobacion local.")
+    st.caption(version_display_text())
 
     with st.form("request_login_form", clear_on_submit=False):
         email = st.text_input("Correo", placeholder="usuario@dominio.com").strip().lower()
