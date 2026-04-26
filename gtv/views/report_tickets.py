@@ -25,8 +25,8 @@ DOCUMENT_TYPE_OPTIONS = ["", "reporte", "hallazgo", "estimacion"]
 
 
 def render(connection, user: AuthenticatedUser) -> None:
-    st.header("Reporte de tickets y hallazgos")
-    st.caption("Filtra tickets y hallazgos por fecha, torre, equipo y estado. Exporta el reporte a Excel o PDF.")
+    st.header("Listado de reportes y hallazgos")
+    st.caption("Filtra reportes, hallazgos y estimaciones por fecha, torre, equipo y estado. Exporta el listado a Excel o PDF.")
 
     if "report_ticket_filters" not in st.session_state:
         st.session_state["report_ticket_filters"] = {}
@@ -38,7 +38,7 @@ def render(connection, user: AuthenticatedUser) -> None:
         with cols[0]:
             tower = tower_filter_selectbox("Torre", key="report-ticket-tower")
         with cols[1]:
-            equipment = equipment_filter_selectbox("Equipo", key="report-ticket-equipment", include_other=True)
+            equipment = equipment_filter_selectbox("Equipo", key="report-ticket-equipment", tower=tower, include_other=True)
         state = cols[2].selectbox("Estado", options=state_options, key="report-ticket-state")
         ticket = cols[3].text_input("Ticket / hallazgo", key="report-ticket-ticket")
         document_type = cols[4].selectbox(

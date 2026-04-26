@@ -6,6 +6,7 @@ DOCUMENT_TYPES = {
     "reporte": "Reporte de Fallas",
     "hallazgo": "Reporte de Hallazgo",
     "estimacion": "Estimacion",
+    "ticket_usuario": "Ticket Usuario",
     "no_reconocido": "No reconocido",
 }
 
@@ -13,6 +14,7 @@ DOCUMENT_FOLDERS = {
     "reporte": "reportes",
     "hallazgo": "hallazgos",
     "estimacion": "estimaciones",
+    "ticket_usuario": "tickets_usuario",
     "no_reconocido": "no_reconocidos",
     "duplicado": "duplicados",
     "exporte": "exportes",
@@ -24,7 +26,7 @@ LINK_VISUAL_LABELS = {
     "posible": "8 a 15 dias",
 }
 
-POSITION_DEFAULTS = ["izquierdo", "derecho", "carga", "unico"]
+POSITION_DEFAULTS = ["izquierdo", "derecho", "servicio", "carga", "unico"]
 
 USER_STATUSES = ["activo", "pendiente_aprobacion", "rechazado", "deshabilitado"]
 USER_ROLES = ["semilla_admin", "usuario"]
@@ -56,6 +58,8 @@ ITEM_PAYMENT_STATES = ["no_pagada", "pagada_parcial", "pagada_total"]
 
 MATCH_STATES = ["confirmada", "sugerida", "sin_match", "cotizada_sin_hallazgo"]
 
+ESTIMATE_RULES_EFFECTIVE_DATE = "2026-04-26"
+
 INCIDENT_TYPES = [
     "tipo_no_reconocido",
     "duplicado_nombre",
@@ -73,3 +77,4 @@ CASE_STATUS_PRESETS = [
     "cerrado",
 ]
 
+USER_TICKET_STATES = ["abierto", "en_revision", "cerrado"]

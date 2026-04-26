@@ -13,6 +13,27 @@ CREATE TABLE IF NOT EXISTS positions (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS equipment_catalog (
+    equipment_code TEXT PRIMARY KEY,
+    tower TEXT NOT NULL,
+    position_name TEXT,
+    display_name TEXT NOT NULL UNIQUE,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS equipment_aliases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    alias_text TEXT NOT NULL UNIQUE,
+    normalized_alias TEXT NOT NULL UNIQUE,
+    equipment_code TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'seed', 'documento')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (equipment_code) REFERENCES equipment_catalog (equipment_code) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     email TEXT NOT NULL UNIQUE,
@@ -97,7 +118,7 @@ CREATE TABLE IF NOT EXISTS case_daily_counters (
 
 CREATE TABLE IF NOT EXISTS documents (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    document_type TEXT NOT NULL CHECK (document_type IN ('reporte', 'hallazgo', 'estimacion', 'no_reconocido')),
+    document_type TEXT NOT NULL CHECK (document_type IN ('reporte', 'hallazgo', 'estimacion', 'ticket_usuario', 'no_reconocido')),
     classification_source TEXT NOT NULL DEFAULT 'automatico' CHECK (classification_source IN ('automatico', 'manual')),
     extraction_status TEXT NOT NULL CHECK (extraction_status IN ('ok', 'parcial', 'requiere_revision')),
     duplicate_status TEXT NOT NULL DEFAULT 'original' CHECK (duplicate_status IN ('original', 'pending_review', 'kept_duplicate', 'discarded')),
@@ -174,6 +195,9 @@ CREATE TABLE IF NOT EXISTS estimates (
     document_id INTEGER PRIMARY KEY,
     original_folio TEXT,
     normalized_folio TEXT,
+    report_reference_text TEXT,
+    finding_reference_text TEXT,
+    missing_supporting_reference INTEGER NOT NULL DEFAULT 0,
     estimate_state TEXT NOT NULL DEFAULT 'abierta' CHECK (estimate_state IN ('abierta', 'aprobada', 'pagada_parcial', 'pagada_total', 'en_surtimiento', 'parcialmente_recibida', 'completada', 'cancelada')),
     delivery_days INTEGER,
     estimated_delivery_date TEXT,
@@ -189,6 +213,17 @@ CREATE TABLE IF NOT EXISTS estimate_items (
     estimate_document_id INTEGER NOT NULL,
     line_number INTEGER NOT NULL,
     concept_text TEXT NOT NULL,
+    equipment_text_original TEXT,
+    equipment_code TEXT,
+    report_reference_text TEXT,
+    finding_reference_text TEXT,
+    report_document_id INTEGER,
+    finding_document_id INTEGER,
+    user_ticket_id INTEGER,
+    delivery_days INTEGER,
+    estimated_delivery_date TEXT,
+    missing_catalog_equipment INTEGER NOT NULL DEFAULT 0,
+    missing_supporting_reference INTEGER NOT NULL DEFAULT 0,
     quantity REAL NOT NULL DEFAULT 0,
     unit_price REAL NOT NULL DEFAULT 0,
     subtotal REAL NOT NULL DEFAULT 0,
@@ -200,7 +235,9 @@ CREATE TABLE IF NOT EXISTS estimate_items (
     invoice_date TEXT,
     invoice_number TEXT,
     notes TEXT,
-    FOREIGN KEY (estimate_document_id) REFERENCES estimates (document_id) ON DELETE CASCADE
+    FOREIGN KEY (estimate_document_id) REFERENCES estimates (document_id) ON DELETE CASCADE,
+    FOREIGN KEY (report_document_id) REFERENCES documents (id),
+    FOREIGN KEY (finding_document_id) REFERENCES documents (id)
 );
 
 CREATE TABLE IF NOT EXISTS estimate_item_units (
@@ -238,6 +275,28 @@ CREATE TABLE IF NOT EXISTS cases (
     FOREIGN KEY (created_by_user_id) REFERENCES users (id)
 );
 
+CREATE TABLE IF NOT EXISTS user_tickets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_folio TEXT NOT NULL UNIQUE,
+    document_date TEXT NOT NULL,
+    document_time TEXT,
+    tower TEXT,
+    equipment_code TEXT,
+    equipment_text_original TEXT,
+    description TEXT NOT NULL,
+    ticket_state TEXT NOT NULL DEFAULT 'abierto' CHECK (ticket_state IN ('abierto', 'en_revision', 'cerrado')),
+    observations TEXT,
+    source_document_id INTEGER,
+    original_report_reference TEXT,
+    original_finding_reference TEXT,
+    original_estimate_reference TEXT,
+    created_by_user_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (source_document_id) REFERENCES documents (id),
+    FOREIGN KEY (created_by_user_id) REFERENCES users (id)
+);
+
 CREATE TABLE IF NOT EXISTS case_documents (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     case_id INTEGER NOT NULL,
@@ -249,6 +308,18 @@ CREATE TABLE IF NOT EXISTS case_documents (
     notes TEXT,
     FOREIGN KEY (case_id) REFERENCES cases (id) ON DELETE CASCADE,
     FOREIGN KEY (document_id) REFERENCES documents (id) ON DELETE CASCADE,
+    FOREIGN KEY (linked_by_user_id) REFERENCES users (id)
+);
+
+CREATE TABLE IF NOT EXISTS case_user_tickets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id INTEGER NOT NULL,
+    user_ticket_id INTEGER NOT NULL UNIQUE,
+    linked_by_user_id INTEGER,
+    linked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    notes TEXT,
+    FOREIGN KEY (case_id) REFERENCES cases (id) ON DELETE CASCADE,
+    FOREIGN KEY (user_ticket_id) REFERENCES user_tickets (id) ON DELETE CASCADE,
     FOREIGN KEY (linked_by_user_id) REFERENCES users (id)
 );
 
@@ -317,7 +388,12 @@ CREATE INDEX IF NOT EXISTS idx_documents_type_date ON documents (document_type, 
 CREATE INDEX IF NOT EXISTS idx_documents_identifier ON documents (primary_identifier);
 CREATE INDEX IF NOT EXISTS idx_documents_equipment ON documents (equipment_key, document_date);
 CREATE INDEX IF NOT EXISTS idx_documents_equipment_code ON documents (equipment_code, document_date);
+CREATE INDEX IF NOT EXISTS idx_equipment_catalog_tower ON equipment_catalog (tower, is_active);
+CREATE INDEX IF NOT EXISTS idx_equipment_aliases_code ON equipment_aliases (equipment_code, normalized_alias);
+CREATE INDEX IF NOT EXISTS idx_estimate_items_equipment_code ON estimate_items (equipment_code, estimated_delivery_date);
+CREATE INDEX IF NOT EXISTS idx_estimate_items_support_flags ON estimate_items (missing_catalog_equipment, missing_supporting_reference);
 CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents (status, incident_type);
 CREATE INDEX IF NOT EXISTS idx_notifications_status ON notifications (status, recipient_email);
 CREATE INDEX IF NOT EXISTS idx_case_suggestions_document ON case_link_suggestions (document_id, link_status);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_event_at ON audit_logs (event_at DESC);
+CREATE INDEX IF NOT EXISTS idx_user_tickets_date ON user_tickets (document_date DESC, ticket_state);

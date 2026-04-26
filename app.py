@@ -10,6 +10,7 @@ from gtv.views import (
     audit,
     case_detail,
     cases,
+    equipment_catalog,
     estimate_listing,
     incidents,
     loaded_documents,
@@ -47,7 +48,7 @@ page = render_sidebar_navigation(connection, settings, user)
 
 if page == "Carga de archivos":
     uploads.render(connection, settings, user)
-elif page == "Listado de reportes/tickets":
+elif page == "Listado de reportes y hallazgos":
     report_tickets.render(connection, user)
 elif page == "Reporte de fallas":
     report_hallazgos.render(connection, user)
@@ -61,6 +62,8 @@ elif page == "Búsqueda":
     search.render(connection, user)
 elif page == "Documentos cargados":
     loaded_documents.render(connection, user)
+elif page == "Catálogo de elevadores":
+    equipment_catalog.render(connection, user)
 elif page == "Listado de casos":
     cases.render(connection)
 elif page == "Detalle de caso":

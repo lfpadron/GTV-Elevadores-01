@@ -18,7 +18,7 @@ from gtv.views.common import (
     tower_filter_selectbox,
 )
 
-DOCUMENT_TYPE_OPTIONS = ["", "reporte", "hallazgo", "estimacion"]
+DOCUMENT_TYPE_OPTIONS = ["", "reporte", "hallazgo", "ticket_usuario", "estimacion"]
 
 
 def _origin_label(row: dict) -> str:
@@ -28,6 +28,8 @@ def _origin_label(row: dict) -> str:
         return f"Reporte {reference}"
     if source_type == "hallazgo":
         return f"Hallazgo {reference}"
+    if source_type == "ticket_usuario":
+        return f"Ticket usuario {reference}"
     if source_type == "estimacion":
         return f"Estimación {reference}"
     return f"{source_type.title()} {reference}".strip()
@@ -37,6 +39,7 @@ def _document_type_filter_label(value: str) -> str:
     labels = {
         "reporte": "Reporte",
         "hallazgo": "Hallazgo",
+        "ticket_usuario": "Ticket usuario",
         "estimacion": "Estimación",
     }
     return labels.get(value, value.title())
@@ -54,7 +57,7 @@ def render(connection, user: AuthenticatedUser) -> None:
             with cols[0]:
                 tower = tower_filter_selectbox("Torre", key="structured-tower")
             with cols[1]:
-                equipment = equipment_filter_selectbox("Equipo", key="structured-equipment", include_other=True)
+                equipment = equipment_filter_selectbox("Equipo", key="structured-equipment", tower=tower, include_other=True)
             with cols[2]:
                 document_type = st.selectbox(
                     "Tipo de documento",
@@ -85,16 +88,16 @@ def render(connection, user: AuthenticatedUser) -> None:
         rows = st.session_state.get("structured_results", [])
         if rows:
             active_filters = st.session_state.get("structured_search_filters", {})
-            selected_document_id = st.session_state.get("selected_structured_document_id")
-            visible_ids = [row["document_id"] for row in rows]
-            if selected_document_id not in visible_ids:
-                selected_document_id = visible_ids[0]
-                st.session_state["selected_structured_document_id"] = selected_document_id
+            selected_record_key = st.session_state.get("selected_structured_record_key")
+            visible_keys = [row["record_key"] for row in rows]
+            if selected_record_key not in visible_keys:
+                selected_record_key = visible_keys[0]
+                st.session_state["selected_structured_record_key"] = selected_record_key
 
             table_rows = [
                 {
-                    "Seleccionar": row["document_id"] == selected_document_id,
-                    "document_id": row["document_id"],
+                    "Seleccionar": row["record_key"] == selected_record_key,
+                    "record_key": row["record_key"],
                     "origen_documental": row.get("document_type") or "",
                     "referencia_origen": row.get("source_reference") or row.get("primary_identifier") or "",
                     "identificador_principal": row.get("primary_identifier") or "",
@@ -120,7 +123,7 @@ def render(connection, user: AuthenticatedUser) -> None:
                 disabled=[column for column in table_df.columns if column != "Seleccionar"],
                 column_config={
                     "Seleccionar": st.column_config.CheckboxColumn("Seleccionar"),
-                    "document_id": None,
+                    "record_key": None,
                 },
             )
 
@@ -128,8 +131,8 @@ def render(connection, user: AuthenticatedUser) -> None:
             if len(selected_rows) > 1:
                 st.warning("Selecciona solo un documento a la vez. Se mostrará el primero marcado.")
             if not selected_rows.empty:
-                selected_document_id = int(selected_rows.iloc[0]["document_id"])
-                st.session_state["selected_structured_document_id"] = selected_document_id
+                selected_record_key = str(selected_rows.iloc[0]["record_key"])
+                st.session_state["selected_structured_record_key"] = selected_record_key
 
             criteria_lines = export_service.format_filter_criteria(
                 active_filters,
@@ -143,7 +146,11 @@ def render(connection, user: AuthenticatedUser) -> None:
                     "inclusion_status": "Incluidos / ignorados",
                 },
             )
-            excel_bytes, pdf_bytes = export_service.export_search_rows(rows, criteria_lines=criteria_lines)
+            export_rows = [
+                {key: value for key, value in row.items() if key not in {"Seleccionar", "record_key"}}
+                for row in table_rows
+            ]
+            excel_bytes, pdf_bytes = export_service.export_search_rows(export_rows, criteria_lines=criteria_lines)
             st.download_button(
                 "Exportar Excel",
                 data=excel_bytes,
@@ -157,17 +164,17 @@ def render(connection, user: AuthenticatedUser) -> None:
                 mime="application/pdf",
             )
 
-            selected_row = next((row for row in rows if row["document_id"] == selected_document_id), None)
+            selected_row = next((row for row in rows if row["record_key"] == selected_record_key), None)
             if selected_row:
                 st.subheader("Documento seleccionado")
                 st.write(f"Documento original: {selected_row.get('file_name_original') or ''}")
                 st.write(f"Origen: {_origin_label(selected_row)}")
-                if st.checkbox("Previsualizar documento seleccionado", key=f"structured-preview-{selected_document_id}"):
+                if st.checkbox("Previsualizar documento seleccionado", key=f"structured-preview-{selected_record_key}"):
                     storage_path = selected_row.get("storage_path")
                     if storage_path:
-                        render_pdf_preview(storage_path, key=f"structured-pdf-{selected_document_id}")
+                        render_pdf_preview(storage_path, key=f"structured-pdf-{selected_record_key}")
                     else:
-                        st.error("El documento seleccionado no tiene ruta de archivo asociada.")
+                        st.info("El registro seleccionado no tiene PDF propio para previsualizar.")
 
     with text_tab:
         with st.form("fts-search-form"):
@@ -176,7 +183,7 @@ def render(connection, user: AuthenticatedUser) -> None:
             with cols[0]:
                 tower_fts = tower_filter_selectbox("Torre (opcional)", key="tower-fts")
             with cols[1]:
-                equipment_fts = equipment_filter_selectbox("Equipo (opcional)", key="equipment-fts", include_other=True)
+                equipment_fts = equipment_filter_selectbox("Equipo (opcional)", key="equipment-fts", tower=tower_fts, include_other=True)
             with cols[2]:
                 document_type_fts = st.selectbox(
                     "Tipo de documento",
@@ -198,6 +205,7 @@ def render(connection, user: AuthenticatedUser) -> None:
             results, error = search_service.run_full_text_search(connection, filters)
             st.session_state["fts_results"] = results
             st.session_state["fts_error"] = error
+            st.session_state["fts_filters"] = filters
             mark_user_activity(connection)
             connection.commit()
 
@@ -205,7 +213,7 @@ def render(connection, user: AuthenticatedUser) -> None:
             st.error(st.session_state["fts_error"])
         fts_rows = st.session_state.get("fts_results", [])
         if fts_rows:
-            visible_keys = [f"{row['document_id']}:{row['page_number']}" for row in fts_rows]
+            visible_keys = [row["record_key"] for row in fts_rows]
             selected_result_key = st.session_state.get("selected_fts_result_key")
             if selected_result_key not in visible_keys:
                 selected_result_key = visible_keys[0]
@@ -213,8 +221,8 @@ def render(connection, user: AuthenticatedUser) -> None:
 
             table_rows = [
                 {
-                    "Seleccionar": f"{row['document_id']}:{row['page_number']}" == selected_result_key,
-                    "result_key": f"{row['document_id']}:{row['page_number']}",
+                    "Seleccionar": row["record_key"] == selected_result_key,
+                    "result_key": row["record_key"],
                     "causa": row.get("cause_text") or "",
                     "recomendacion": row.get("recommendation_text") or "",
                     "documento_original": row.get("file_name_original") or "",
@@ -246,11 +254,43 @@ def render(connection, user: AuthenticatedUser) -> None:
                 selected_result_key = str(selected_rows.iloc[0]["result_key"])
                 st.session_state["selected_fts_result_key"] = selected_result_key
 
+            active_fts_filters = st.session_state.get("fts_filters", {})
+            criteria_lines = export_service.format_filter_criteria(
+                active_fts_filters,
+                {
+                    "free_text": "Texto libre",
+                    "tower": "Torre",
+                    "equipment": "Equipo",
+                    "document_type": "Tipo de documento",
+                    "inclusion_status": "Incluidos / ignorados",
+                },
+            )
+            export_rows = [
+                {key: value for key, value in row.items() if key not in {"Seleccionar", "result_key"}}
+                for row in table_rows
+            ]
+            excel_bytes, pdf_bytes = export_service.export_search_rows(export_rows, criteria_lines=criteria_lines)
+            export_cols = st.columns(2)
+            export_cols[0].download_button(
+                "Exportar Excel",
+                data=excel_bytes,
+                file_name=export_service.export_filename("busqueda_texto_libre", "xlsx"),
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="fts-export-excel",
+            )
+            export_cols[1].download_button(
+                "Exportar PDF",
+                data=pdf_bytes,
+                file_name=export_service.export_filename("busqueda_texto_libre", "pdf"),
+                mime="application/pdf",
+                key="fts-export-pdf",
+            )
+
             selected_row = next(
                 (
                     row
                     for row in fts_rows
-                    if f"{row['document_id']}:{row['page_number']}" == selected_result_key
+                    if row["record_key"] == selected_result_key
                 ),
                 None,
             )
@@ -263,15 +303,20 @@ def render(connection, user: AuthenticatedUser) -> None:
                 st.write(selected_row.get("snippet") or "")
                 if st.checkbox(
                     "Previsualizar documento seleccionado",
-                    key=f"fts-preview-{selected_row['document_id']}-{selected_row['page_number']}",
+                    key=f"fts-preview-{selected_result_key}",
                 ):
-                    render_pdf_preview(selected_row["storage_path"], key=f"fts-pdf-{selected_row['document_id']}")
-                pdf_path = Path(selected_row["storage_path"])
-                if pdf_path.exists():
+                    storage_path = selected_row.get("storage_path")
+                    if storage_path:
+                        render_pdf_preview(storage_path, key=f"fts-pdf-{selected_result_key}")
+                    else:
+                        st.info("El registro seleccionado no tiene PDF propio para previsualizar.")
+                storage_path = selected_row.get("storage_path")
+                pdf_path = Path(storage_path) if storage_path else None
+                if pdf_path and pdf_path.exists():
                     st.download_button(
                         "Descargar documento seleccionado",
                         data=pdf_path.read_bytes(),
                         file_name=pdf_path.name,
                         mime="application/pdf",
-                        key=f"download-{selected_row['document_id']}-{selected_row['page_number']}",
+                        key=f"download-{selected_result_key}",
                     )

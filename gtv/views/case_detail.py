@@ -68,6 +68,8 @@ def render(connection, user: AuthenticatedUser) -> None:
     st.dataframe(pd.DataFrame(bundle["finding_documents"]), use_container_width=True)
     st.markdown("**Estimaciones vinculadas**")
     st.dataframe(pd.DataFrame(bundle["estimate_documents"]), use_container_width=True)
+    st.markdown("**Tickets usuario vinculados**")
+    st.dataframe(pd.DataFrame(bundle["user_tickets"]), use_container_width=True)
 
     all_documents = bundle["reports"] + bundle["finding_documents"] + bundle["estimate_documents"]
     if all_documents:

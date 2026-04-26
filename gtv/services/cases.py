@@ -6,6 +6,7 @@ from sqlite3 import Connection
 
 from gtv.repositories import cases as case_repo
 from gtv.repositories import documents as document_repo
+from gtv.repositories import user_tickets as user_ticket_repo
 from gtv.services.classifiers import proximity_label
 from gtv.utils.dates import days_between
 
@@ -14,11 +15,12 @@ def suggest_case_status(connection: Connection, case_id: int) -> str:
     reports = document_repo.list_documents_by_case_and_type(connection, case_id, "reporte")
     findings = document_repo.list_documents_by_case_and_type(connection, case_id, "hallazgo")
     estimates = document_repo.list_documents_by_case_and_type(connection, case_id, "estimacion")
+    user_tickets = user_ticket_repo.list_case_user_tickets(connection, case_id)
     estimate_items = document_repo.list_estimate_items_for_case(connection, case_id)
 
-    if not reports and not findings and not estimates:
+    if not reports and not findings and not estimates and not user_tickets:
         return "pendiente_documentacion"
-    if findings and not estimates:
+    if (findings or user_tickets) and not estimates:
         return "pendiente_revision"
     if estimates and any(item["receipt_status"] != "recibida_total" for item in estimate_items):
         return "pendiente_recepcion"
@@ -131,6 +133,7 @@ def build_case_bundle(connection: Connection, case_id: int) -> dict | None:
     reports = document_repo.list_documents_by_case_and_type(connection, case_id, "reporte")
     findings_docs = document_repo.list_documents_by_case_and_type(connection, case_id, "hallazgo")
     estimate_docs = document_repo.list_documents_by_case_and_type(connection, case_id, "estimacion")
+    user_tickets = user_ticket_repo.list_case_user_tickets(connection, case_id)
     findings = document_repo.list_findings_for_case(connection, case_id)
     estimate_items = document_repo.list_estimate_items_for_case(connection, case_id)
     units = document_repo.list_units_for_case(connection, case_id)
@@ -140,6 +143,7 @@ def build_case_bundle(connection: Connection, case_id: int) -> dict | None:
         "reports": reports,
         "finding_documents": findings_docs,
         "estimate_documents": estimate_docs,
+        "user_tickets": user_tickets,
         "findings": findings,
         "estimate_items": estimate_items,
         "units": units,

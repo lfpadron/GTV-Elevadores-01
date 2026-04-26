@@ -7,6 +7,7 @@ import streamlit as st
 
 from gtv.models import AuthenticatedUser
 from gtv.repositories import documents as document_repo
+from gtv.services import exports as export_service
 from gtv.services import updates as update_service
 from gtv.utils.equipment import is_catalog_equipment_code
 from gtv.views.common import (
@@ -32,6 +33,7 @@ def render(connection, user: AuthenticatedUser) -> None:
             equipment = equipment_filter_selectbox(
                 "Equipo",
                 key="loaded-documents-equipment",
+                tower=tower,
                 include_other=True,
             )
         with cols[2]:
@@ -103,6 +105,36 @@ def render(connection, user: AuthenticatedUser) -> None:
     if not selected_rows.empty:
         selected_document_id = int(selected_rows.iloc[0]["document_id"])
         st.session_state["selected_loaded_document_id"] = selected_document_id
+
+    export_rows = [{key: value for key, value in row.items() if key not in {"Seleccionar", "document_id"}} for row in table_rows]
+    criteria_lines = export_service.format_filter_criteria(
+        filters,
+        {
+            "date_from": "Fecha desde",
+            "date_to": "Fecha hasta",
+            "tower": "Torre",
+            "equipment": "Equipo",
+            "document_type": "Tipo de documento",
+        },
+    )
+    excel_bytes, pdf_bytes = export_service.export_item_tracking_report(
+        export_rows,
+        title="Documentos cargados",
+        criteria_lines=criteria_lines,
+    )
+    export_cols = st.columns(2)
+    export_cols[0].download_button(
+        "Exportar Excel",
+        data=excel_bytes,
+        file_name=export_service.export_filename("documentos_cargados", "xlsx"),
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    export_cols[1].download_button(
+        "Exportar PDF",
+        data=pdf_bytes,
+        file_name=export_service.export_filename("documentos_cargados", "pdf"),
+        mime="application/pdf",
+    )
 
     selected_row = next((row for row in rows if row["document_id"] == selected_document_id), None)
     if not selected_row:

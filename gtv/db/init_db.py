@@ -7,6 +7,7 @@ from pathlib import Path
 from gtv.config import Settings, ensure_app_directories, get_settings
 from gtv.constants import POSITION_DEFAULTS
 from gtv.db.connection import get_connection
+from gtv.utils.equipment import default_catalog_seed_rows, normalize_alias_text
 
 
 def _load_schema() -> str:
@@ -22,6 +23,7 @@ def initialize_database(settings: Settings | None = None) -> None:
         connection.executescript(_load_schema())
         _run_safe_migrations(connection)
         _seed_positions(connection)
+        _seed_equipment_catalog(connection)
         _seed_settings(connection, active_settings)
         _seed_admins(connection, active_settings)
         connection.commit()
@@ -60,6 +62,34 @@ def _run_pre_schema_migrations(connection) -> None:
             END
             """
         )
+    if _table_exists(connection, "estimates") and not _column_exists(connection, "estimates", "report_reference_text"):
+        connection.execute("ALTER TABLE estimates ADD COLUMN report_reference_text TEXT")
+    if _table_exists(connection, "estimates") and not _column_exists(connection, "estimates", "finding_reference_text"):
+        connection.execute("ALTER TABLE estimates ADD COLUMN finding_reference_text TEXT")
+    if _table_exists(connection, "estimates") and not _column_exists(connection, "estimates", "missing_supporting_reference"):
+        connection.execute("ALTER TABLE estimates ADD COLUMN missing_supporting_reference INTEGER NOT NULL DEFAULT 0")
+    if _table_exists(connection, "estimate_items") and not _column_exists(connection, "estimate_items", "equipment_text_original"):
+        connection.execute("ALTER TABLE estimate_items ADD COLUMN equipment_text_original TEXT")
+    if _table_exists(connection, "estimate_items") and not _column_exists(connection, "estimate_items", "equipment_code"):
+        connection.execute("ALTER TABLE estimate_items ADD COLUMN equipment_code TEXT")
+    if _table_exists(connection, "estimate_items") and not _column_exists(connection, "estimate_items", "report_reference_text"):
+        connection.execute("ALTER TABLE estimate_items ADD COLUMN report_reference_text TEXT")
+    if _table_exists(connection, "estimate_items") and not _column_exists(connection, "estimate_items", "finding_reference_text"):
+        connection.execute("ALTER TABLE estimate_items ADD COLUMN finding_reference_text TEXT")
+    if _table_exists(connection, "estimate_items") and not _column_exists(connection, "estimate_items", "report_document_id"):
+        connection.execute("ALTER TABLE estimate_items ADD COLUMN report_document_id INTEGER")
+    if _table_exists(connection, "estimate_items") and not _column_exists(connection, "estimate_items", "finding_document_id"):
+        connection.execute("ALTER TABLE estimate_items ADD COLUMN finding_document_id INTEGER")
+    if _table_exists(connection, "estimate_items") and not _column_exists(connection, "estimate_items", "user_ticket_id"):
+        connection.execute("ALTER TABLE estimate_items ADD COLUMN user_ticket_id INTEGER")
+    if _table_exists(connection, "estimate_items") and not _column_exists(connection, "estimate_items", "delivery_days"):
+        connection.execute("ALTER TABLE estimate_items ADD COLUMN delivery_days INTEGER")
+    if _table_exists(connection, "estimate_items") and not _column_exists(connection, "estimate_items", "estimated_delivery_date"):
+        connection.execute("ALTER TABLE estimate_items ADD COLUMN estimated_delivery_date TEXT")
+    if _table_exists(connection, "estimate_items") and not _column_exists(connection, "estimate_items", "missing_catalog_equipment"):
+        connection.execute("ALTER TABLE estimate_items ADD COLUMN missing_catalog_equipment INTEGER NOT NULL DEFAULT 0")
+    if _table_exists(connection, "estimate_items") and not _column_exists(connection, "estimate_items", "missing_supporting_reference"):
+        connection.execute("ALTER TABLE estimate_items ADD COLUMN missing_supporting_reference INTEGER NOT NULL DEFAULT 0")
 
 
 def _run_safe_migrations(connection) -> None:
@@ -100,6 +130,34 @@ def _run_safe_migrations(connection) -> None:
             END
             """
         )
+    if _table_exists(connection, "estimates") and not _column_exists(connection, "estimates", "report_reference_text"):
+        connection.execute("ALTER TABLE estimates ADD COLUMN report_reference_text TEXT")
+    if _table_exists(connection, "estimates") and not _column_exists(connection, "estimates", "finding_reference_text"):
+        connection.execute("ALTER TABLE estimates ADD COLUMN finding_reference_text TEXT")
+    if _table_exists(connection, "estimates") and not _column_exists(connection, "estimates", "missing_supporting_reference"):
+        connection.execute("ALTER TABLE estimates ADD COLUMN missing_supporting_reference INTEGER NOT NULL DEFAULT 0")
+    if _table_exists(connection, "estimate_items") and not _column_exists(connection, "estimate_items", "equipment_text_original"):
+        connection.execute("ALTER TABLE estimate_items ADD COLUMN equipment_text_original TEXT")
+    if _table_exists(connection, "estimate_items") and not _column_exists(connection, "estimate_items", "equipment_code"):
+        connection.execute("ALTER TABLE estimate_items ADD COLUMN equipment_code TEXT")
+    if _table_exists(connection, "estimate_items") and not _column_exists(connection, "estimate_items", "report_reference_text"):
+        connection.execute("ALTER TABLE estimate_items ADD COLUMN report_reference_text TEXT")
+    if _table_exists(connection, "estimate_items") and not _column_exists(connection, "estimate_items", "finding_reference_text"):
+        connection.execute("ALTER TABLE estimate_items ADD COLUMN finding_reference_text TEXT")
+    if _table_exists(connection, "estimate_items") and not _column_exists(connection, "estimate_items", "report_document_id"):
+        connection.execute("ALTER TABLE estimate_items ADD COLUMN report_document_id INTEGER")
+    if _table_exists(connection, "estimate_items") and not _column_exists(connection, "estimate_items", "finding_document_id"):
+        connection.execute("ALTER TABLE estimate_items ADD COLUMN finding_document_id INTEGER")
+    if _table_exists(connection, "estimate_items") and not _column_exists(connection, "estimate_items", "user_ticket_id"):
+        connection.execute("ALTER TABLE estimate_items ADD COLUMN user_ticket_id INTEGER")
+    if _table_exists(connection, "estimate_items") and not _column_exists(connection, "estimate_items", "delivery_days"):
+        connection.execute("ALTER TABLE estimate_items ADD COLUMN delivery_days INTEGER")
+    if _table_exists(connection, "estimate_items") and not _column_exists(connection, "estimate_items", "estimated_delivery_date"):
+        connection.execute("ALTER TABLE estimate_items ADD COLUMN estimated_delivery_date TEXT")
+    if _table_exists(connection, "estimate_items") and not _column_exists(connection, "estimate_items", "missing_catalog_equipment"):
+        connection.execute("ALTER TABLE estimate_items ADD COLUMN missing_catalog_equipment INTEGER NOT NULL DEFAULT 0")
+    if _table_exists(connection, "estimate_items") and not _column_exists(connection, "estimate_items", "missing_supporting_reference"):
+        connection.execute("ALTER TABLE estimate_items ADD COLUMN missing_supporting_reference INTEGER NOT NULL DEFAULT 0")
 
 
 def _seed_positions(connection) -> None:
@@ -112,6 +170,55 @@ def _seed_positions(connection) -> None:
             """,
             (name,),
         )
+
+
+def _seed_equipment_catalog(connection) -> None:
+    if not _table_exists(connection, "equipment_catalog"):
+        return
+    for row in default_catalog_seed_rows():
+        connection.execute(
+            """
+            INSERT INTO equipment_catalog (
+                equipment_code,
+                tower,
+                position_name,
+                display_name,
+                is_active
+            )
+            VALUES (?, ?, ?, ?, 1)
+            ON CONFLICT(equipment_code) DO UPDATE SET
+                tower = excluded.tower,
+                position_name = COALESCE(equipment_catalog.position_name, excluded.position_name),
+                display_name = COALESCE(equipment_catalog.display_name, excluded.display_name),
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                row["equipment_code"],
+                row["tower"],
+                row["position_name"],
+                row["display_name"],
+            ),
+        )
+        for alias in row.get("aliases", []):
+            connection.execute(
+                """
+                INSERT INTO equipment_aliases (
+                    alias_text,
+                    normalized_alias,
+                    equipment_code,
+                    source
+                )
+                VALUES (?, ?, ?, 'seed')
+                ON CONFLICT(normalized_alias) DO UPDATE SET
+                    equipment_code = excluded.equipment_code,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    alias,
+                    normalize_alias_text(alias),
+                    row["equipment_code"],
+                ),
+            )
 
 
 def _seed_settings(connection, settings: Settings) -> None:

@@ -129,6 +129,27 @@ def process_uploaded_pdf(
         )
         incidents.append("extraccion")
 
+    if extracted.document_type == "estimacion":
+        estimate_missing_support = bool(extracted.detail_payload.get("missing_supporting_reference"))
+        item_missing_catalog = any(
+            bool(item.get("missing_catalog_equipment"))
+            for item in extracted.detail_payload.get("items", [])
+        )
+        if estimate_missing_support or item_missing_catalog:
+            details = []
+            if estimate_missing_support:
+                details.append("La estimación no contiene reporte ni hallazgo correspondiente.")
+            if item_missing_catalog:
+                details.append("Hay partidas sin elevador homologado al catálogo.")
+            document_repo.create_incident(
+                connection,
+                document_id=document_id,
+                incident_type="requiere_revision",
+                title="Estimación requiere revisión operativa",
+                details=" ".join(details),
+            )
+            incidents.append("revision_estimacion")
+
     document = document_repo.get_document(connection, document_id)
     if document and not duplicate_matches and extracted.document_type != "no_reconocido":
         suggestions = case_service.suggest_case_links_for_document(connection, document=document)

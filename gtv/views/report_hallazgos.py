@@ -39,7 +39,7 @@ def render(connection, user: AuthenticatedUser) -> None:
         with cols[1]:
             equipment = st.selectbox(
                 "Equipo",
-                options=["", *list_equipment_filter_codes(), EQUIPMENT_OTHER_FILTER_VALUE],
+                options=["", *list_equipment_filter_codes(tower=tower), EQUIPMENT_OTHER_FILTER_VALUE],
                 key="finding-report-equipment",
                 format_func=lambda value: "Todos" if value == "" else format_equipment_filter_option(value),
             ) or None

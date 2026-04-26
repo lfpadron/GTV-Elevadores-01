@@ -8,7 +8,8 @@ import streamlit as st
 from gtv.constants import CASE_STATUS_PRESETS
 from gtv.repositories import cases as case_repo
 from gtv.services import cases as case_service
-from gtv.utils.equipment import resolve_equipment_code_alias
+from gtv.services import exports as export_service
+from gtv.utils.equipment import EQUIPMENT_OTHER_FILTER_VALUE, is_catalog_equipment_code, resolve_equipment_code_alias
 from gtv.views.common import (
     document_reference_text,
     equipment_filter_selectbox,
@@ -74,7 +75,10 @@ def _filter_cases(cases: list[dict], filters: dict) -> list[dict]:
             ]
         ).lower()
         if filters.get("equipment"):
-            if resolved_equipment_code:
+            if filters["equipment"] == EQUIPMENT_OTHER_FILTER_VALUE:
+                if is_catalog_equipment_code(case.get("equipment_key")):
+                    continue
+            elif resolved_equipment_code:
                 if (case.get("equipment_key") or "").upper() != resolved_equipment_code:
                     continue
             elif filters["equipment"].lower() not in equipment_haystack:
@@ -120,7 +124,7 @@ def render(connection) -> None:
         with cols[1]:
             tower = tower_filter_selectbox("Torre", key="case-list-tower")
         with cols[2]:
-            equipment = equipment_filter_selectbox("Equipo", key="case-list-equipment")
+            equipment = equipment_filter_selectbox("Equipo", key="case-list-equipment", tower=tower, include_other=True)
         free_text = cols[3].text_input("Búsqueda texto libre", key="case-list-free-text")
         apply_filters = st.form_submit_button("Aplicar filtros")
 
@@ -182,6 +186,37 @@ def render(connection) -> None:
     if not selected_rows.empty:
         selected_case_id = int(selected_rows.iloc[0]["case_id"])
         st.session_state["selected_case_id"] = selected_case_id
+
+    export_rows = [{key: value for key, value in row.items() if key not in {"Seleccionar", "case_id"}} for row in table_rows]
+    criteria_lines = export_service.format_filter_criteria(
+        filters,
+        {
+            "date_from": "Fecha desde",
+            "date_to": "Fecha hasta",
+            "status": "Status",
+            "tower": "Torre",
+            "equipment": "Equipo",
+            "free_text": "Texto libre",
+        },
+    )
+    excel_bytes, pdf_bytes = export_service.export_item_tracking_report(
+        export_rows,
+        title="Listado de casos",
+        criteria_lines=criteria_lines,
+    )
+    export_cols = st.columns(2)
+    export_cols[0].download_button(
+        "Exportar Excel",
+        data=excel_bytes,
+        file_name=export_service.export_filename("listado_casos", "xlsx"),
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    export_cols[1].download_button(
+        "Exportar PDF",
+        data=pdf_bytes,
+        file_name=export_service.export_filename("listado_casos", "pdf"),
+        mime="application/pdf",
+    )
 
     selected_case = next((case for case in filtered_cases if case["id"] == selected_case_id), None)
     if not selected_case:

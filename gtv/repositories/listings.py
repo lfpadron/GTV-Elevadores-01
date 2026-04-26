@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from sqlite3 import Connection
 
 from gtv.utils.equipment import EQUIPMENT_OTHER_FILTER_VALUE, catalog_equipment_codes, resolve_equipment_code_alias
@@ -222,21 +223,34 @@ def list_estimate_item_rows(connection: Connection, filters: dict) -> list[dict]
         clauses.append("COALESCE(d.tower, '') = ?")
         params.append(filters["tower"])
     if filters.get("equipment"):
-        resolved_code = resolve_equipment_code_alias(filters["equipment"])
-        if resolved_code:
-            clauses.append("COALESCE(d.equipment_code, d.equipment_key, '') = ?")
-            params.append(resolved_code)
-        else:
+        if filters["equipment"] == EQUIPMENT_OTHER_FILTER_VALUE:
+            known_codes = [code.upper() for code in catalog_equipment_codes()]
+            placeholders = ", ".join("?" for _ in known_codes)
             clauses.append(
-                """
+                f"""
                 (
-                    COALESCE(d.equipment_text_original, '') LIKE ?
-                    OR COALESCE(d.equipment_key, '') LIKE ?
-                    OR COALESCE(d.equipment_code, '') LIKE ?
+                    NULLIF(COALESCE(ei.equipment_code, d.equipment_code, ''), '') IS NULL
+                    OR UPPER(COALESCE(ei.equipment_code, d.equipment_code, '')) NOT IN ({placeholders})
                 )
                 """
             )
-            params.extend([f"%{filters['equipment']}%"] * 3)
+            params.extend(known_codes)
+        else:
+            resolved_code = resolve_equipment_code_alias(filters["equipment"])
+            if resolved_code:
+                clauses.append("COALESCE(ei.equipment_code, d.equipment_code, d.equipment_key, '') = ?")
+                params.append(resolved_code)
+            else:
+                clauses.append(
+                    """
+                    (
+                        COALESCE(ei.equipment_text_original, d.equipment_text_original, '') LIKE ?
+                        OR COALESCE(d.equipment_key, '') LIKE ?
+                        OR COALESCE(ei.equipment_code, d.equipment_code, '') LIKE ?
+                    )
+                    """
+                )
+                params.extend([f"%{filters['equipment']}%"] * 3)
     if filters.get("piece_text"):
         clauses.append("COALESCE(ei.concept_text, '') LIKE ?")
         params.append(f"%{filters['piece_text']}%")
@@ -269,6 +283,14 @@ def list_estimate_item_rows(connection: Connection, filters: dict) -> list[dict]
         clauses.append("cd.case_id IS NOT NULL")
     elif filters.get("link_status") == "por_vincular":
         clauses.append("cd.case_id IS NULL")
+    if filters.get("support_status") == "sin_soporte":
+        clauses.append("COALESCE(ei.missing_supporting_reference, es.missing_supporting_reference, 0) = 1")
+    elif filters.get("support_status") == "con_soporte":
+        clauses.append("COALESCE(ei.missing_supporting_reference, es.missing_supporting_reference, 0) = 0")
+    if filters.get("catalog_status") == "sin_catalogo":
+        clauses.append("COALESCE(ei.missing_catalog_equipment, 0) = 1")
+    elif filters.get("catalog_status") == "en_catalogo":
+        clauses.append("COALESCE(ei.missing_catalog_equipment, 0) = 0")
 
     state_filter = filters.get("item_state")
     if state_filter:
@@ -343,9 +365,23 @@ def list_estimate_item_rows(connection: Connection, filters: dict) -> list[dict]
             c.case_folio,
             es.estimate_state,
             COALESCE(es.normalized_folio, es.original_folio, d.primary_identifier, '') AS estimate_reference,
+            es.report_reference_text AS estimate_report_reference_text,
+            es.finding_reference_text AS estimate_finding_reference_text,
+            es.missing_supporting_reference AS estimate_missing_supporting_reference,
             ei.id AS estimate_item_id,
             ei.line_number,
             ei.concept_text,
+            ei.equipment_text_original AS item_equipment_text_original,
+            ei.equipment_code AS item_equipment_code,
+            ei.report_reference_text,
+            ei.finding_reference_text,
+            ei.report_document_id,
+            ei.finding_document_id,
+            ei.user_ticket_id,
+            ei.delivery_days,
+            ei.estimated_delivery_date,
+            ei.missing_catalog_equipment,
+            ei.missing_supporting_reference,
             ei.quantity,
             ei.unit_price,
             ei.subtotal,
@@ -356,6 +392,11 @@ def list_estimate_item_rows(connection: Connection, filters: dict) -> list[dict]
             ei.payment_method,
             ei.invoice_date,
             ei.invoice_number,
+            rd.file_name_original AS report_document_name,
+            fd.file_name_original AS finding_document_name,
+            COALESCE(fr_map.ticket_number, rd.primary_identifier, '') AS mapped_report_reference,
+            COALESCE(fi_map.base_ticket_number, fi_map.finding_folio, fd.primary_identifier, '') AS mapped_finding_reference,
+            ut.ticket_folio AS mapped_user_ticket_folio,
             COALESCE(
                 (
                     SELECT COUNT(*)
@@ -438,6 +479,11 @@ def list_estimate_item_rows(connection: Connection, filters: dict) -> list[dict]
         LEFT JOIN positions p ON p.id = d.position_id
         LEFT JOIN case_documents cd ON cd.document_id = d.id
         LEFT JOIN cases c ON c.id = cd.case_id
+        LEFT JOIN documents rd ON rd.id = ei.report_document_id
+        LEFT JOIN fault_reports fr_map ON fr_map.document_id = rd.id
+        LEFT JOIN documents fd ON fd.id = ei.finding_document_id
+        LEFT JOIN findings fi_map ON fi_map.document_id = fd.id
+        LEFT JOIN user_tickets ut ON ut.id = ei.user_ticket_id
         WHERE {" AND ".join(clauses)}
         ORDER BY d.document_date DESC, d.id DESC, ei.line_number ASC, ei.id ASC
         """,
@@ -445,6 +491,8 @@ def list_estimate_item_rows(connection: Connection, filters: dict) -> list[dict]
     ).fetchall()
 
     enriched_rows: list[dict] = []
+    today_date = date.today()
+    today = today_date.isoformat()
     for row in rows:
         item = dict(row)
         quantity = float(item.get("quantity") or 0)
@@ -483,6 +531,28 @@ def list_estimate_item_rows(connection: Connection, filters: dict) -> list[dict]
         else:
             operational_bucket = "pendiente"
 
+        support_labels = []
+        if item.get("mapped_report_reference"):
+            support_labels.append(f"REPORTE {item['mapped_report_reference']}")
+        elif item.get("report_reference_text"):
+            support_labels.append(f"REPORTE {item['report_reference_text']}")
+        if item.get("mapped_finding_reference"):
+            support_labels.append(f"HALLAZGO {item['mapped_finding_reference']}")
+        elif item.get("finding_reference_text"):
+            support_labels.append(f"HALLAZGO {item['finding_reference_text']}")
+        if item.get("mapped_user_ticket_folio"):
+            support_labels.append(f"TICKET USUARIO {item['mapped_user_ticket_folio']}")
+
+        estimated_delivery_date = item.get("estimated_delivery_date") or ""
+        delivery_bucket = ""
+        if estimated_delivery_date:
+            if item.get("receipt_status") == "recibida_total" or received_units >= int(item.get("quantity") or 0):
+                delivery_bucket = "entregado"
+            elif estimated_delivery_date < today:
+                delivery_bucket = "atrasado"
+            else:
+                delivery_bucket = "pendiente_entrega"
+
         item["received_units"] = received_units
         item["paid_units"] = paid_units
         item["paid_amount"] = round(paid_amount, 2)
@@ -490,7 +560,16 @@ def list_estimate_item_rows(connection: Connection, filters: dict) -> list[dict]
         item["invoice_flag"] = "SI" if invoice_flag else "NO"
         item["operational_bucket"] = operational_bucket
         item["requested_date"] = item.get("document_date")
+        item["support_reference_display"] = " | ".join(support_labels) if support_labels else "No vinculado"
+        item["effective_equipment_code"] = item.get("item_equipment_code") or item.get("equipment_code")
+        item["effective_equipment_text"] = item.get("item_equipment_text_original") or item.get("equipment_text_original")
+        item["delivery_bucket"] = delivery_bucket
+        item["delivery_delay_flag"] = "SI" if delivery_bucket == "atrasado" else "NO"
         enriched_rows.append(item)
+
+    delivery_filter = filters.get("delivery_filter")
+    if delivery_filter:
+        enriched_rows = _apply_delivery_filters(enriched_rows, delivery_filter)
 
     return enriched_rows
 
@@ -511,13 +590,13 @@ def list_estimate_rows(connection: Connection, filters: dict) -> list[dict]:
                 "tower": row.get("tower"),
                 "position_name": row.get("position_name"),
                 "equipment_text_original": row.get("equipment_text_original"),
-                "equipment_code": row.get("equipment_code"),
+                "equipment_code": row.get("effective_equipment_code") or row.get("equipment_code"),
                 "equipment_key": row.get("equipment_key"),
                 "case_id": row.get("case_id"),
                 "case_folio": row.get("case_folio"),
                 "estimate_state": row.get("estimate_state"),
                 "estimate_reference": row.get("estimate_reference"),
-                "linked_references": row.get("linked_references"),
+                "linked_references": row.get("support_reference_display") or row.get("linked_references"),
                 "summary_text": row.get("summary_text"),
                 "missing_link_indicator": "SI" if row.get("link_status") == "por_vincular" else "NO",
             }
@@ -659,3 +738,51 @@ def list_hallazgo_report_rows(connection: Connection, filters: dict) -> list[dic
         params,
     ).fetchall()
     return [dict(row) for row in rows]
+
+
+def _apply_delivery_filters(rows: list[dict], delivery_filter: str) -> list[dict]:
+    today = date.today()
+    filtered: list[dict] = []
+    for row in rows:
+        estimated_delivery = row.get("estimated_delivery_date")
+        estimated_date = None
+        if estimated_delivery:
+            try:
+                estimated_date = date.fromisoformat(str(estimated_delivery))
+            except ValueError:
+                estimated_date = None
+
+        if delivery_filter == "proximos_3_dias":
+            if estimated_date and today <= estimated_date <= date.fromordinal(today.toordinal() + 3):
+                filtered.append(row)
+            continue
+        if delivery_filter == "proximos_5_dias":
+            if estimated_date and today <= estimated_date <= date.fromordinal(today.toordinal() + 5):
+                filtered.append(row)
+            continue
+        if delivery_filter == "atrasados":
+            if row.get("delivery_bucket") == "atrasado":
+                filtered.append(row)
+            continue
+        if delivery_filter == "entregados":
+            if row.get("delivery_bucket") == "entregado":
+                filtered.append(row)
+            continue
+        if delivery_filter == "con_falta_pago":
+            if row.get("payment_status") != "pagada_total":
+                filtered.append(row)
+            continue
+        if delivery_filter == "ya_pagados":
+            if row.get("payment_status") == "pagada_total":
+                filtered.append(row)
+            continue
+        if delivery_filter == "con_falta_factura":
+            if row.get("invoice_flag") != "SI":
+                filtered.append(row)
+            continue
+        if delivery_filter == "ya_facturados":
+            if row.get("invoice_flag") == "SI":
+                filtered.append(row)
+            continue
+        filtered.append(row)
+    return filtered

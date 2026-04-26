@@ -44,9 +44,36 @@ def render(connection, user: AuthenticatedUser) -> None:
         with cols[1]:
             tower = tower_filter_selectbox("Torre", key="partidas-tower")
         with cols[2]:
-            equipment = equipment_filter_selectbox("Equipo", key="partidas-equipment")
+            equipment = equipment_filter_selectbox("Equipo", key="partidas-equipment", tower=tower, include_other=True)
         ticket = cols[3].text_input("Ticket", key="partidas-ticket")
         item_state = cols[4].selectbox("Estado", options=ITEM_STATE_FILTERS, key="partidas-state")
+        free_text = st.text_input("Texto libre", key="partidas-free-text")
+        delivery_filter = st.selectbox(
+            "Entrega / pago / factura",
+            options=[
+                "",
+                "proximos_3_dias",
+                "proximos_5_dias",
+                "atrasados",
+                "entregados",
+                "con_falta_pago",
+                "ya_pagados",
+                "con_falta_factura",
+                "ya_facturados",
+            ],
+            format_func=lambda value: {
+                "": "Todos",
+                "proximos_3_dias": "Próximos a entregar (3 días)",
+                "proximos_5_dias": "Próximos a entregar (5 días)",
+                "atrasados": "Ya atrasados",
+                "entregados": "Ya entregados",
+                "con_falta_pago": "Con falta de pago",
+                "ya_pagados": "Ya pagados",
+                "con_falta_factura": "Con falta de factura",
+                "ya_facturados": "Ya facturados",
+            }.get(value, value),
+            key="partidas-delivery-filter",
+        )
         submitted = st.form_submit_button("Aplicar filtros")
 
     if submitted:
@@ -57,7 +84,9 @@ def render(connection, user: AuthenticatedUser) -> None:
             "tower": tower or None,
             "equipment": equipment or None,
             "ticket": ticket or None,
+            "piece_text": free_text or None,
             "item_state": item_state or None,
+            "delivery_filter": delivery_filter or None,
         }
         mark_user_activity(connection)
         connection.commit()
@@ -72,7 +101,7 @@ def render(connection, user: AuthenticatedUser) -> None:
             "Seleccionar": False,
             "estimate_item_id": row["estimate_item_id"],
             "Caso": row.get("case_folio") or "Sin caso",
-            "Reporte/hallazgo": row.get("linked_references") or "No vinculado",
+            "Reporte/hallazgo": row.get("support_reference_display") or "No vinculado",
             "Documento": f"{row.get('estimate_reference') or ''} | {row.get('file_name_original') or ''}",
             "Torre y equipo": _equipment_label(row),
             "Descripción pieza": row.get("concept_text") or "",
@@ -81,6 +110,8 @@ def render(connection, user: AuthenticatedUser) -> None:
             "Monto estimación": row.get("subtotal") or 0,
             "Monto pagado": row.get("paid_amount") or 0,
             "Factura": row.get("invoice_display") or ("SI" if row.get("invoice_flag") == "SI" else ""),
+            "Entrega estimada": row.get("estimated_delivery_date") or "",
+            "Atraso entrega": row.get("delivery_delay_flag") or "",
         }
         for row in rows
     ]
@@ -117,16 +148,18 @@ def render(connection, user: AuthenticatedUser) -> None:
     export_rows = _build_export_rows(rows)
     criteria_lines = export_service.format_filter_criteria(
         st.session_state.get("partidas_filters", {}),
-        {
-            "date_from": "Fecha desde",
-            "date_to": "Fecha hasta",
-            "case_search": "Caso",
-            "tower": "Torre",
-            "equipment": "Equipo",
-            "ticket": "Ticket",
-            "item_state": "Estado",
-        },
-    )
+                {
+                    "date_from": "Fecha desde",
+                    "date_to": "Fecha hasta",
+                    "case_search": "Caso",
+                    "tower": "Torre",
+                    "equipment": "Equipo",
+                    "ticket": "Ticket",
+                    "piece_text": "Texto libre",
+                    "item_state": "Estado",
+                    "delivery_filter": "Entrega / pago / factura",
+                },
+            )
     excel_bytes, pdf_bytes = export_service.export_item_tracking_report(
         export_rows,
         title="Reporte de partidas",
@@ -160,6 +193,7 @@ def render(connection, user: AuthenticatedUser) -> None:
     metric_cols[4].metric("Importe pagado", f"${float(selected_row.get('paid_amount') or 0):,.2f}")
 
     st.write(f"Reporte/hallazgo: {selected_row.get('linked_references') or 'No vinculado'}")
+    st.write(f"Soporte actual: {selected_row.get('support_reference_display') or 'No vinculado'}")
     st.write(f"Documento: {selected_row.get('file_name_original') or ''}")
     st.write(f"Torre y equipo: {_equipment_label(selected_row)}")
     st.write(f"Descripción: {selected_row.get('concept_text') or ''}")
@@ -221,6 +255,7 @@ def _build_export_rows(rows: list[dict]) -> list[dict]:
         export_rows.append(
             {
                 "Número de ticket": row.get("linked_references") or "No vinculado",
+                "Soporte": row.get("support_reference_display") or "No vinculado",
                 "Número de caso": row.get("case_folio") or "Sin caso",
                 "Si es reporte o hallazgo": row.get("related_origin_types") or "",
                 "Número de cot": row.get("estimate_reference") or "",
@@ -239,9 +274,9 @@ def _build_export_rows(rows: list[dict]) -> list[dict]:
 
 def _equipment_label(row: dict) -> str:
     pieces = [
-        row.get("equipment_code") or "",
+        row.get("effective_equipment_code") or row.get("equipment_code") or "",
         row.get("tower") or "",
         row.get("position_name") or "",
-        row.get("equipment_text_original") or "",
+        row.get("effective_equipment_text") or row.get("equipment_text_original") or "",
     ]
     return " | ".join(piece for piece in pieces if piece)

@@ -29,10 +29,11 @@ PRIMARY_NAV_PAGES = [
     "Reporte de fallas",
     "Búsqueda",
     "Documentos cargados",
+    "Catálogo de elevadores",
 ]
 
 SECONDARY_NAV_PAGES = [
-    "Listado de reportes/tickets",
+    "Listado de reportes y hallazgos",
     "Listado de estimaciones",
     "Partidas",
     "Incidencias",
@@ -111,13 +112,19 @@ def document_label(document: dict) -> str:
     return f"{type_label} - {reference}"
 
 
+def user_ticket_reference_text(user_ticket: dict) -> str:
+    return user_ticket.get("ticket_folio") or "sin referencia"
+
+
 def render_related_documents(bundle: dict, *, key_prefix: str) -> None:
     sections = [
         ("Reportes", bundle.get("reports", [])),
         ("Hallazgos", bundle.get("finding_documents", [])),
         ("Estimaciones", bundle.get("estimate_documents", [])),
+        ("Tickets usuario", bundle.get("user_tickets", [])),
     ]
     preview_documents: list[dict] = []
+    preview_ticket_options: dict[str, dict] = {}
 
     for section_title, documents in sections:
         st.markdown(f"**{section_title}**")
@@ -125,25 +132,41 @@ def render_related_documents(bundle: dict, *, key_prefix: str) -> None:
             st.caption(f"Sin {section_title.lower()}.")
             continue
 
-        preview_documents.extend(documents)
-        rows = [
-            {
-                "tipo": document_label(document),
-                "fecha": document.get("document_date") or "",
-                "hora": document.get("document_time") or "",
-                "archivo": document.get("file_name_original") or "",
-            }
-            for document in documents
-        ]
+        if section_title == "Tickets usuario":
+            rows = []
+            for ticket in documents:
+                preview_ticket_options[
+                    f"TU-{ticket['id']} - {user_ticket_reference_text(ticket)} - {ticket.get('description') or ''}"
+                ] = ticket
+                rows.append(
+                    {
+                        "tipo": f"Ticket usuario - {user_ticket_reference_text(ticket)}",
+                        "fecha": ticket.get("document_date") or "",
+                        "hora": ticket.get("document_time") or "",
+                        "archivo": ticket.get("source_document_name") or "Sin PDF",
+                    }
+                )
+        else:
+            preview_documents.extend(documents)
+            rows = [
+                {
+                    "tipo": document_label(document),
+                    "fecha": document.get("document_date") or "",
+                    "hora": document.get("document_time") or "",
+                    "archivo": document.get("file_name_original") or "",
+                }
+                for document in documents
+            ]
         st.dataframe(numbered_dataframe(rows, start=0), use_container_width=True)
 
-    if not preview_documents:
+    if not preview_documents and not preview_ticket_options:
         return
 
-    option_map = {
+    option_map: dict[str, dict] = {
         f"{doc['id']} - {document_label(doc)} - {doc.get('file_name_original') or ''}": doc
         for doc in preview_documents
     }
+    option_map.update(preview_ticket_options)
     selected_label = st.selectbox(
         "Documento a previsualizar",
         options=list(option_map.keys()),
@@ -151,10 +174,14 @@ def render_related_documents(bundle: dict, *, key_prefix: str) -> None:
     )
     selected_document = option_map[selected_label]
     if st.button("Previsualizar documento seleccionado", key=f"{key_prefix}-preview-button"):
-        render_pdf_preview(
-            selected_document["storage_path"],
-            key=f"{key_prefix}-pdf-{selected_document['id']}",
-        )
+        storage_path = selected_document.get("storage_path")
+        if storage_path:
+            render_pdf_preview(
+                storage_path,
+                key=f"{key_prefix}-pdf-{selected_document.get('id') or selected_document.get('document_id')}",
+            )
+        else:
+            st.info("El ticket usuario no tiene PDF propio para previsualizar.")
 
 
 def tower_filter_selectbox(label: str, *, key: str, include_all: bool = True) -> str | None:
@@ -171,12 +198,18 @@ def equipment_filter_selectbox(
     label: str,
     *,
     key: str,
+    tower: str | None = None,
     include_all: bool = True,
     include_other: bool = False,
 ) -> str | None:
-    options = ([""] if include_all else []) + list_equipment_filter_codes()
+    options = ([""] if include_all else []) + list_equipment_filter_codes(tower=tower)
     if include_other:
         options.append(EQUIPMENT_OTHER_FILTER_VALUE)
+    if not options:
+        options = [""]
+    current_value = st.session_state.get(key)
+    if current_value not in options:
+        st.session_state[key] = options[0] if options else None
     return st.selectbox(
         label,
         options=options,

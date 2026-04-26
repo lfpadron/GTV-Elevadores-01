@@ -98,6 +98,28 @@ def get_document_with_details(connection: Connection, document_id: int) -> dict 
     return document
 
 
+def list_documents_by_type(connection: Connection, document_type: str, *, tower: str | None = None, equipment_code: str | None = None) -> list[dict]:
+    clauses = ["document_type = ?", "document_status = 'activo'"]
+    params: list[object] = [document_type]
+    if tower:
+        clauses.append("COALESCE(tower, '') = ?")
+        params.append(tower)
+    if equipment_code:
+        clauses.append("COALESCE(equipment_code, equipment_key, '') = ?")
+        params.append(equipment_code)
+    rows = connection.execute(
+        f"""
+        SELECT d.*, p.name AS position_name
+        FROM documents d
+        LEFT JOIN positions p ON p.id = d.position_id
+        WHERE {" AND ".join(clauses)}
+        ORDER BY d.document_date DESC, d.document_time DESC, d.id DESC
+        """,
+        params,
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def list_loaded_documents(connection: Connection, filters: dict) -> list[dict]:
     clauses = ["1 = 1"]
     params: list[object] = []
@@ -340,6 +362,9 @@ def upsert_estimate(connection: Connection, document_id: int, payload: dict) -> 
             document_id,
             original_folio,
             normalized_folio,
+            report_reference_text,
+            finding_reference_text,
+            missing_supporting_reference,
             estimate_state,
             delivery_days,
             estimated_delivery_date,
@@ -348,10 +373,13 @@ def upsert_estimate(connection: Connection, document_id: int, payload: dict) -> 
             total_amount,
             source_pages
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(document_id) DO UPDATE SET
             original_folio = excluded.original_folio,
             normalized_folio = excluded.normalized_folio,
+            report_reference_text = excluded.report_reference_text,
+            finding_reference_text = excluded.finding_reference_text,
+            missing_supporting_reference = excluded.missing_supporting_reference,
             estimate_state = excluded.estimate_state,
             delivery_days = excluded.delivery_days,
             estimated_delivery_date = excluded.estimated_delivery_date,
@@ -364,6 +392,9 @@ def upsert_estimate(connection: Connection, document_id: int, payload: dict) -> 
             document_id,
             payload.get("original_folio"),
             payload.get("normalized_folio"),
+            payload.get("report_reference_text"),
+            payload.get("finding_reference_text"),
+            int(payload.get("missing_supporting_reference") or 0),
             payload.get("estimate_state", "abierta"),
             payload.get("delivery_days"),
             payload.get("estimated_delivery_date"),
@@ -385,16 +416,38 @@ def replace_estimate_items(connection: Connection, estimate_document_id: int, it
                 estimate_document_id,
                 line_number,
                 concept_text,
+                equipment_text_original,
+                equipment_code,
+                report_reference_text,
+                finding_reference_text,
+                report_document_id,
+                finding_document_id,
+                user_ticket_id,
+                delivery_days,
+                estimated_delivery_date,
+                missing_catalog_equipment,
+                missing_supporting_reference,
                 quantity,
                 unit_price,
                 subtotal
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 estimate_document_id,
                 item.get("line_number"),
                 item.get("concept_text"),
+                item.get("equipment_text_original"),
+                item.get("equipment_code"),
+                item.get("report_reference_text"),
+                item.get("finding_reference_text"),
+                item.get("report_document_id"),
+                item.get("finding_document_id"),
+                item.get("user_ticket_id"),
+                item.get("delivery_days"),
+                item.get("estimated_delivery_date"),
+                int(item.get("missing_catalog_equipment") or 0),
+                int(item.get("missing_supporting_reference") or 0),
                 item.get("quantity", 0),
                 item.get("unit_price", 0),
                 item.get("subtotal", 0),
@@ -683,9 +736,20 @@ def discard_other_case_suggestions(connection: Connection, *, document_id: int, 
 def list_documents_without_case(connection: Connection) -> list[dict]:
     rows = connection.execute(
         """
-        SELECT d.*, p.name AS position_name
+        SELECT
+            d.*,
+            p.name AS position_name,
+            CASE
+                WHEN d.document_type = 'reporte' THEN COALESCE(fr.ticket_number, d.primary_identifier, '')
+                WHEN d.document_type = 'hallazgo' THEN COALESCE(fi.base_ticket_number, fi.finding_folio, d.primary_identifier, '')
+                WHEN d.document_type = 'estimacion' THEN COALESCE(es.normalized_folio, es.original_folio, d.primary_identifier, '')
+                ELSE COALESCE(d.primary_identifier, '')
+            END AS source_reference
         FROM documents d
         LEFT JOIN positions p ON p.id = d.position_id
+        LEFT JOIN fault_reports fr ON fr.document_id = d.id
+        LEFT JOIN findings fi ON fi.document_id = d.id
+        LEFT JOIN estimates es ON es.document_id = d.id
         LEFT JOIN case_documents cd ON cd.document_id = d.id
         WHERE d.document_type <> 'no_reconocido'
           AND d.document_status = 'activo'
